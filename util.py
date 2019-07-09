@@ -3,7 +3,11 @@ import numpy as np
 from scipy.optimize import curve_fit
 @numba.njit("i4(i8[:])")
 def tau_rand_int(state):
-    """A fast (pseudo)-random number generator.
+    """
+    This Method is originally written by L. McInness  in his UMAP implementation.
+    Using same code block for efficiency.
+
+    A fast (pseudo)-random number generator.
 
     Parameters
     ----------
