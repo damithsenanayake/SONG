@@ -14,7 +14,7 @@ INT32_MAX = np.iinfo(np.int32).max - 1
 
 class SONG(BaseEstimator):
 
-    def __init__(self, out_dim=2, n_neighbors = 20,  lr=1., its = 60, spread_factor = 0.9, spread = 1., min_dist = 0.01,
+    def __init__(self, out_dim=2, n_neighbors = 20,  lr=1., its = 60, spread_factor = 0.7, spread = 1., min_dist = 0.01,
                  ns_rate = 5, push_strength = 1., init=None, self_organizing_stride = 12, lr_decay_const = 1):
         self.ns_rate = ns_rate
         self.dim = out_dim
@@ -87,11 +87,8 @@ class SONG(BaseEstimator):
                 t = i* 1./self.max_its
                 so_iter = not(i%self.ss)
                 growing_iter = t<= 0.5
-                if i == 0:
-                    X_presented = X[order]
-                else:
-                    presented_len = int(X.shape[0] * np.exp(-4 * (1 - t) ** 2))
-                    X_presented = X[order[:presented_len]]
+                presented_len = int(X.shape[0] * np.exp(-4 * (1 - t) ** 2))
+                X_presented = X[order[:presented_len]]
 
                 if so_iter:
                     k = 0
