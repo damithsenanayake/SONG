@@ -1,13 +1,20 @@
 import numba
 import numpy as np
 from scipy.optimize import curve_fit
+
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
 @numba.njit("i4(i8[:])")
 def tau_rand_int(state):
-    """
-    This Method is originally written by L. McInness  in his UMAP implementation.
-    Using same code block for efficiency.
-
-    A fast (pseudo)-random number generator.
+    """A fast (pseudo)-random number generator.
 
     Parameters
     ----------
@@ -30,6 +37,25 @@ def tau_rand_int(state):
 
     return state[0] ^ state[1] ^ state[2]
 
+@numba.njit('f4[:,:](f4[:,:], f4[:, :])', fastmath=True)
+def matmul(A, B):
+
+    C = np.zeros((A.shape[0], B.shape[1]))
+
+    for i in range(A.shape[0]):
+        for j in range(B.shape[1]):
+            cij =0
+            for k in range(A.shape[1]):
+                cij += A[i, k] * B[k, j]
+            C[i, j] = cij
+
+    return C.astype(np.float32)
+
+def fast_pairwise(x, W):
+
+    dists_2 = np.sum(x ** 2) + np.sum(W ** 2, axis=1) - 2 * matmul(np.array([x]), W.T)#np.dot(np.array([x]), W.T)
+
+    return dists_2.flatten()
 
 @numba.njit("Tuple((f4[:], i4[:]))(f4[:],f4[:,:], i4)", fastmath=True, parallel=True)
 def pairwise_and_neighbors(x, W, n_neis):
@@ -68,7 +94,27 @@ def pairwise_and_neighbors(x, W, n_neis):
             l = (l_ret[:k])
             neinds = n_ret[:k]
 
-    return np.array(dists_2).astype(np.float32), np.array(neinds, dtype=np.int32)
+    return np.array(l).astype(np.float32), np.array(neinds, dtype=np.int32)
+
+
+@numba.njit('f4[:](f4[:], f4[:,:])', fastmath=True)
+def numba_ind_pairwise(x, W):
+    distsq = np.zeros(W.shape[0], dtype= np.float32)
+    for i in range(W.shape[0]):
+        for j in range(len(x)):
+            distsq[i] += pow(x[j] - W[i][j], 2)
+
+    return distsq
+
+
+@numba.njit('Tuple((f4[:, :], i4[:,:]))(f4[:,:], f4[:, :], i4)', fastmath = True, parallel = True)
+def batch_pairwise(X, W, k):
+    neighbors = np.zeros((X.shape[0], np.int64(k))).astype(np.int32)
+    dists = np.zeros((X.shape[0],np.int64(k))).astype(np.float32)
+
+    for i in range(X.shape[0]):
+        dists[i], neighbors[i] = pairwise_and_neighbors(X[0], W, k)
+    return dists, neighbors
 
 @numba.njit('i4[:](i4[:], i4[:])')
 def get_mutual_neighborhood(im_neix, rev_neis):
@@ -90,28 +136,6 @@ def positive_clip(x, v):
     else :
         return x
 
-def delete_mult_nodes(node_list, G, W, Y, E_q):
-    keepinds = np.setdiff1d(np.arange(G.shape[0]), node_list)
-    G = G[keepinds][:, keepinds]
-    W = W[keepinds]
-    Y = Y[keepinds]
-    E_q = E_q[keepinds]
-    return G, W, Y, E_q
-
-def delete_node(node, G, W, Y, E_q):
-    keepinds = []#np.where(np.abs(np.array(range(G.shape[0]), dtype=np.int32)-node))[0]
-    for i in range(G.shape[0]):
-        if not(i==node):
-            keepinds.append(i)
-    G = G[keepinds][:, keepinds]
-    W = W[keepinds]
-    Y = Y[keepinds]
-    E_q = E_q[keepinds]
-    return G, W, Y, E_q
-
-def remove_duplicates(self):
-    for j in np.where(np.isnan(self.Y.sum(axis=0))):
-        self.delete_node(j)
 def find_spread_tightness(spread, min_dist):
     def curve (x, a, b):
         return 1./(1. + a * x ** (2*b))
@@ -122,12 +146,9 @@ def find_spread_tightness(spread, min_dist):
     yv[xv>=min_dist] = np.exp( - (xv[xv>=min_dist] - min_dist)/ spread)
     params, covar = curve_fit(curve, xv, yv)
     params = params.astype(np.float32)
-    if params[1]<1:
-        ''' Needed to avoid negative powers'''
-        params[1] = max(params[1], 1.)
     return params[0], params[1]
 
-
+@numba.jit()
 def grow_map_at_node(b, neighbors, E_q, thresh_g, im_neix, W, Y, G):
     e_ratio = E_q[b] / thresh_g
     # for k in range(int(e_ratio)):
@@ -143,12 +164,13 @@ def grow_map_at_node(b, neighbors, E_q, thresh_g, im_neix, W, Y, G):
         Y.resize(np.array(Y.shape) + np.array([1, 0]), refcheck=False)
         Y[-1] = Y_n
         oldG = G
-        G = np.zeros(np.array(G.shape)+1).astype(np.int8)
+        G = np.zeros(np.array(G.shape)+1).astype(np.float32)
         G[:-1, :-1] = oldG
         ''' connect neighbors to the new node '''
         G[-1, closests] = 1
         G[closests, -1] = 1
-
+        G[b, closests] = 0
+        G[closests, b] = 0
         ''' Append new error. '''
         E_q.resize(E_q.shape[0]+1, refcheck=False)
         E_q[-1] = 0
@@ -171,17 +193,11 @@ def train_neighborhood(x, y_b, W, hdist_nei, Y_nei, Y_oth, alpha, beta , mindist
     ''' Self Organizing '''
     for j in range(W.shape[0]):
         hdist = hdists[j]
-        h_pull_grad =  np.exp(-2*hdist)
-        ldist_sq = rdist(y_b, Y_nei[j])
-        '''deltas of the embedding are multiplied by a regularization term equal to the euclidean distance'''
-        pull_grad = (2 * alpha * beta * pow(ldist_sq, beta - 1))
-        denom = (1 + alpha * pow(ldist_sq, beta))
-        pull_grad/= denom
-
+        h_pull_grad =  np.exp(-1.*hdist)
         for i in range(x.shape[0]):
             W[j][i] += h_pull_grad * lr * (x[i] - W[j][i])
-            if i < y_b.shape[0]:
-                Y_nei[j][i] += positive_clip(pull_grad * (y_b[i]-Y_nei[j][i]), 4) * lr
+
+
 
     '''negative embedding'''
     for j in range(Y_oth.shape[0]):
@@ -191,19 +207,43 @@ def train_neighborhood(x, y_b, W, hdist_nei, Y_nei, Y_oth, alpha, beta , mindist
         push_grad /= denom
         for i in range(y_b.shape[0]):
             if ldist_sq >0.:
-                Y_oth[j][i] -= positive_clip(push_grad / ldist_sq * (y_b[i]-Y_oth[j][i]) , 4)* lr
+                y_b[i] += positive_clip(push_grad / (ldist_sq + 0.001) * (y_b[i]-Y_oth[j][i]) , 4)* lr # correction to prevent explosions
+
             elif b == negs[j]:
                 continue
             else :
                 Y_oth[j][i] += lr * 4
+    for j in range(W.shape[0]):
+        ldist_sq = rdist(y_b, Y_nei[j])
+        '''deltas of the embedding are multiplied by a regularization term equal to the euclidean distance'''
+        pull_grad = (2 * alpha * beta * pow(ldist_sq, beta - 1))
+        denom = (1 + alpha * pow(ldist_sq, beta))
+        pull_grad /= denom
+        for i in range(y_b.shape[0]):
+            Y_nei[j][i] += positive_clip(pull_grad * (y_b[i] - Y_nei[j][i]), 4) * lr
+            y_b[i] -= positive_clip(pull_grad * (y_b[i] - Y_nei[j][i]), 4) * lr
 
     return W, Y_nei, Y_oth
 
 
 
 @numba.njit('f4[:, :](f4[:,:], i4[:], f4, f4, f4, i4, i4, i8[:])', parallel = True, fastmath=True)
-def train_embedding(Y, neighbors, alpha, beta ,lr, b, ns_rate, rng_state):
+def train_embedding(Y, neighbors, alpha, beta ,lr, b, neg_samples, rng_state):
     y_b = Y[b]
+    '''negative embedding'''
+    for p in range(neg_samples):
+        j = tau_rand_int(rng_state) % Y.shape[0]
+        ldist_sq = rdist(y_b, Y[j])
+        push_grad = (2 * beta)
+        denom = 1 + alpha * pow(ldist_sq, beta)
+        push_grad /= denom
+        for i in range(y_b.shape[0]):
+            if ldist_sq > 0.:
+                y_b[i] += positive_clip(push_grad / (ldist_sq+0.001) * (y_b[i] - Y[j][i]), 4) * lr
+            elif b == j:
+                continue
+            else:
+                Y[j][i] += lr * 4
     ''' Self Organizing '''
     for j in range(neighbors.shape[0]):
         ldist_sq = rdist(y_b, Y[neighbors[j]])
@@ -214,40 +254,32 @@ def train_embedding(Y, neighbors, alpha, beta ,lr, b, ns_rate, rng_state):
 
         for i in range(y_b.shape[0]):
             Y[neighbors[j]][i] += positive_clip(pull_grad * (y_b[i]-Y[neighbors[j]][i]) , 4)* lr
+            y_b[i] -= positive_clip(pull_grad * (y_b[i] - Y[neighbors[j]][i]), 4) * lr
 
-    '''negative embedding'''
-    for p in range(neighbors.shape[0] * ns_rate):
-        j = tau_rand_int(rng_state) % Y.shape[0]
-        ldist_sq = rdist(y_b, Y[j])
-        push_grad = (2  * beta)
-        denom = 1 + alpha * pow(ldist_sq, beta)
-        push_grad /= denom
-        for i in range(y_b.shape[0]):
-            if ldist_sq >0.:
-                Y[j][i] -= positive_clip(push_grad / ldist_sq * (y_b[i]-Y[j][i]) , 4)* lr
-            elif b == j:
-                continue
-            else :
-                Y[j][i] += lr * 4
+
 
     return Y
 
-@numba.njit('f4[:,:](f4[:,:], f4, f4[:,:], i1[:, :], i4[:,:], i4, f4, i4, i4, f4, f4, i8[:])', fastmath = True, parallel = True)
-def embed_batch(X, lrst, Y, G, knn_recorded, max_its, lrdec, i, ns_rate, alpha, beta, rng_state):
+@numba.njit('f4[:,:](f4[:,:], f4, f4[:,:], f4[:, :], i4[:,:], i4, f4, i4, i4, f4, f4, i8[:], f8)', fastmath = True, parallel = True)
+def embed_batch(X, lrst, Y, G, knn_recorded, max_its, lrdec, i, ns_rate, alpha, beta, rng_state, min_strength):
+
+    edge_sum = np.sum(G, axis= 0).astype(np.float64)
+    edge_sum /= edge_sum.max()
+
     for j in range(X.shape[0]):
         tau = (X.shape[0] * i + j) * 1. / (max_its * X.shape[0])
         lr = np.float32(lrst * (1 - tau) ** lrdec)
         im_neis = knn_recorded[j]
         b = im_neis[0]
-        rev_neis = np.where(G[:, b])[0].astype(np.int32)
-        # G[b] *= 0
+        G[b] *= 0.5
         for imnei in im_neis:
             G[b, imnei] = 1
-
-        neighbors = get_mutual_neighborhood(im_neis, rev_neis)  # (x, W[im_neis], im_neis, rev_neis)
-        Y = train_embedding(Y, neighbors, alpha, beta, lr, b, ns_rate, rng_state)
-        # if not np.mod(j, 500):
-            # print('\r |G|= '+(G.shape[0])+' , iter = '+(i+1) +' , X_i = ' + (j)),
+        G[b][G[b]<min_strength] = 0
+        G[:, b][G[:, b]<min_strength] = 0
+        mut_neis = np.where(G[b] + G[:, b])[0].astype(np.int32)
+        neighbors = mut_neis
+        n_ns = np.sum(G[:,b] * G[:, b]) * ns_rate
+        Y = train_embedding(Y, neighbors, alpha, beta, lr, b, n_ns, rng_state)
 
     return Y
 
@@ -275,19 +307,17 @@ def get_neighbor_hdists(x, W, imneis, revneis):
             dists.append(dist)
     return np.array(mut_neis).astype(np.int32), max_val, np.array(dists).astype(np.float32)
 
-@numba.njit('f4[:,:](i4, i4, f4[:,:], f4, f4[:,:], i1[:, :], i4[:,:], i4, f4, i4, f4, f4, i8[:])', fastmath = True, parallel = True)
-def embed_batch_for_iters (start_iter, end_iter, X, lrst, Y, G, knn_recorded, max_its, lrdec, ns_rate, alpha, beta, rng_state):
-    for p in range(start_iter, end_iter):
-       Y =  embed_batch(X, lrst, Y, G, knn_recorded, max_its, lrdec, np.int32(p), ns_rate, alpha, beta, rng_state)
-    return Y
+#
 
 
-class bcolors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
+@numba.njit('i4[:](i4[:], i4[:])')
+def fast_intersect(neilist, neighbors):
+    l = np.zeros(neighbors.shape[0], dtype = np.int32)
+    for i in range(neilist.shape[0]):
+        for j in range(neighbors.shape[0]):
+            if neilist[i] == neighbors[j]:
+                l[j] = i
+
+                break
+
+    return l
