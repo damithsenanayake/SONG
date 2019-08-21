@@ -1,6 +1,17 @@
 import numba
 import numpy as np
 from scipy.optimize import curve_fit
+
+class bcolors:
+    HEADER = '\033[95m'
+    OKBLUE = '\033[94m'
+    OKGREEN = '\033[92m'
+    WARNING = '\033[93m'
+    FAIL = '\033[91m'
+    ENDC = '\033[0m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+
 @numba.njit("i4(i8[:])")
 def tau_rand_int(state):
     """A fast (pseudo)-random number generator.
