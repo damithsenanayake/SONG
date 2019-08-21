@@ -1,17 +1,6 @@
 import numba
 import numpy as np
 from scipy.optimize import curve_fit
-
-class bcolors:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
-
 @numba.njit("i4(i8[:])")
 def tau_rand_int(state):
     """A fast (pseudo)-random number generator.
@@ -57,7 +46,7 @@ def fast_pairwise(x, W):
 
     return dists_2.flatten()
 
-@numba.njit("Tuple((f4[:], i4[:]))(f4[:],f4[:,:], i4)", fastmath=True, parallel=True)
+@numba.njit("Tuple((f4[:], i4[:]))(f4[:],f4[:,:], i4)", fastmath=True)
 def pairwise_and_neighbors(x, W, n_neis):
     dists_2 = []
     l = [np.float32(np.inf) for i in range(n_neis)]
@@ -107,7 +96,7 @@ def numba_ind_pairwise(x, W):
     return distsq
 
 
-@numba.njit('Tuple((f4[:, :], i4[:,:]))(f4[:,:], f4[:, :], i4)', fastmath = True, parallel = True)
+@numba.njit('Tuple((f4[:, :], i4[:,:]))(f4[:,:], f4[:, :], i4)', fastmath = True)
 def batch_pairwise(X, W, k):
     neighbors = np.zeros((X.shape[0], np.int64(k))).astype(np.int32)
     dists = np.zeros((X.shape[0],np.int64(k))).astype(np.float32)
@@ -148,52 +137,54 @@ def find_spread_tightness(spread, min_dist):
     params = params.astype(np.float32)
     return params[0], params[1]
 
-@numba.jit()
+@numba.njit('Tuple((f4[:,:], f4[:,:], f4[:,:], f4[:]))(i4, i4[:], f4[:], f8, i8, f4[:, :], f4[:,:], f4[:, :])')
 def grow_map_at_node(b, neighbors, E_q, thresh_g, im_neix, W, Y, G):
-    e_ratio = E_q[b] / thresh_g
-    # for k in range(int(e_ratio)):
-    if e_ratio>1:
-        ''' position of the new node is the centroid of the k-simplex closest to the growing node'''
 
-        closests = neighbors[:im_neix]#[E_q[neighbors].argsort()][-(im_neix):]
-        W_n = W[closests].mean(axis=0)
-        Y_n = Y[closests].mean(axis=0)
-        new_W_size = np.array(W.shape)+np.array([1, 0])
-        W.resize(new_W_size, refcheck=False)
-        W[-1] = W_n
-        Y.resize(np.array(Y.shape) + np.array([1, 0]), refcheck=False)
-        Y[-1] = Y_n
+    if E_q[b] > thresh_g:
+        ''' position of the new node is the centroid of the k-simplex closest to the growing node'''
         oldG = G
-        G = np.zeros(np.array(G.shape)+1).astype(np.float32)
-        G[:-1, :-1] = oldG
+        oldW = W
+        oldY = Y
+        oldE = E_q
+        closests = neighbors[:im_neix]
+        W_n = W[closests].sum(axis=0) / len(closests)
+        Y_n = Y[closests].sum(axis=0) / len(closests)
+        W = np.zeros((W.shape[0] + 1, W.shape[1]), dtype=np.float32)
+        W[:-1] = oldW
+        W[-1] = W_n
+        Y = np.zeros((Y.shape[0]+1, Y.shape[1]), dtype=np.float32)
+        Y[: -1] = oldY
+        Y[-1] = Y_n
+        G = np.zeros((G.shape[0]+1, G.shape[1]+1), dtype=np.float32)
+        G[:-1][ :, :-1] = oldG
         ''' connect neighbors to the new node '''
-        G[-1, closests] = 1
-        G[closests, -1] = 1
-        G[b, closests] = 0
-        G[closests, b] = 0
+        G[-1][ closests] = 1
+        G[closests][:, -1] = 1
+        G[b][closests] = 0
+        G[closests][:, b] = 0
         ''' Append new error. '''
-        E_q.resize(E_q.shape[0]+1, refcheck=False)
+        E_q =np.zeros(E_q.shape[0]+1,dtype=np.float32)
+        E_q[:-1] = oldE
         E_q[-1] = 0
         E_q[closests] = 0
 
     return G, W, Y, E_q
 
-
-@numba.njit('f4(f4[:], f4[:])', fastmath=True, parallel=True)
+@numba.njit('f4(f4[:], f4[:])', fastmath=True)
 def rdist(x, y):
     dist = 0
     for i in range(len(x)):
         dist += pow(x[i] - y[i], 2)
     return dist
 
-@numba.njit('UniTuple(f4[:, :], 3)(f4[:], f4[:], f4[:,:],f4[:], f4[:, :], f4[:,:], f4, f4, f4, f4, i4, i4[:])', parallel = True, fastmath=True)
+@numba.njit('UniTuple(f4[:, :], 3)(f4[:], f4[:], f4[:,:],f4[:], f4[:, :], f4[:,:], f4, f4, f4, f4, i4, i4[:])', fastmath=True)
 def train_neighborhood(x, y_b, W, hdist_nei, Y_nei, Y_oth, alpha, beta , mindist, lr, b, negs):
     hdists = hdist_nei
 
     ''' Self Organizing '''
     for j in range(W.shape[0]):
         hdist = hdists[j]
-        h_pull_grad =  np.exp(-1.*hdist)
+        h_pull_grad =  np.exp(-2.*hdist)
         for i in range(x.shape[0]):
             W[j][i] += h_pull_grad * lr * (x[i] - W[j][i])
 
@@ -227,7 +218,7 @@ def train_neighborhood(x, y_b, W, hdist_nei, Y_nei, Y_oth, alpha, beta , mindist
 
 
 
-@numba.njit('f4[:, :](f4[:,:], i4[:], f4, f4, f4, i4, i4, i8[:])', parallel = True, fastmath=True)
+@numba.njit('f4[:, :](f4[:,:], i4[:], f4, f4, f4, i4, i4, i8[:])',  fastmath=True)
 def train_embedding(Y, neighbors, alpha, beta ,lr, b, neg_samples, rng_state):
     y_b = Y[b]
     '''negative embedding'''
@@ -260,12 +251,9 @@ def train_embedding(Y, neighbors, alpha, beta ,lr, b, neg_samples, rng_state):
 
     return Y
 
-@numba.njit('f4[:,:](f4[:,:], f4, f4[:,:], f4[:, :], i4[:,:], i4, f4, i4, i4, f4, f4, i8[:], f8)', fastmath = True, parallel = True)
+@numba.njit('f4[:,:](f4[:,:], f4, f4[:,:], f4[:, :], i4[:,:], i4, f4, i4, i4, f4, f4, i8[:], f8)', fastmath = True)
 def embed_batch(X, lrst, Y, G, knn_recorded, max_its, lrdec, i, ns_rate, alpha, beta, rng_state, min_strength):
-
-    edge_sum = np.sum(G, axis= 0).astype(np.float64)
-    edge_sum /= edge_sum.max()
-
+    shp = np.arange(G.shape[0] ).astype(np.int32)
     for j in range(X.shape[0]):
         tau = (X.shape[0] * i + j) * 1. / (max_its * X.shape[0])
         lr = np.float32(lrst * (1 - tau) ** lrdec)
@@ -276,7 +264,7 @@ def embed_batch(X, lrst, Y, G, knn_recorded, max_its, lrdec, i, ns_rate, alpha, 
             G[b, imnei] = 1
         G[b][G[b]<min_strength] = 0
         G[:, b][G[:, b]<min_strength] = 0
-        mut_neis = np.where(G[b] + G[:, b])[0].astype(np.int32)
+        mut_neis = shp[G[b] + G[:, b] > 0]
         neighbors = mut_neis
         n_ns = np.sum(G[:,b] * G[:, b]) * ns_rate
         Y = train_embedding(Y, neighbors, alpha, beta, lr, b, n_ns, rng_state)
@@ -286,7 +274,7 @@ def embed_batch(X, lrst, Y, G, knn_recorded, max_its, lrdec, i, ns_rate, alpha, 
 
 
 
-@numba.njit('Tuple((i4[:], f4, f4[:]))(f4[:], f4[:,:], i4[:], i4[:])', fastmath=True, parallel=True)
+@numba.njit('Tuple((i4[:], f4, f4[:]))(f4[:], f4[:,:], i4[:], i4[:])', fastmath=True)
 def get_neighbor_hdists(x, W, imneis, revneis):
     max_val = -1
     dists =[]
