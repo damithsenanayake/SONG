@@ -3,8 +3,7 @@ from sklearn.metrics.pairwise import pairwise_distances_argmin
 from sklearn.manifold import SpectralEmbedding
 from sklearn.base import BaseEstimator
 import matplotlib.pyplot as plt
-from util.text_color import bcolors
-from util.sched_util import  find_spread_tightness, \
+from util import  find_spread_tightness, \
      train_for_input, train_for_batch, bulk_grow, embed_batch_epochs
 
 INT32_MIN = np.iinfo(np.int32).min + 1
