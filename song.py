@@ -2,7 +2,6 @@ import numpy as np
 from sklearn.metrics.pairwise import pairwise_distances_argmin
 from sklearn.manifold import SpectralEmbedding
 from sklearn.base import BaseEstimator
-import matplotlib.pyplot as plt
 from util import  find_spread_tightness, \
      train_for_input, train_for_batch, bulk_grow, embed_batch_epochs
 
