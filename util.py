@@ -93,7 +93,6 @@ def rdist(x, y):
         dist += pow(x[i] - y[i], 2)
     return dist
 
-# @numba.njit()
 @numba.jit()
 def bulk_grow(shp, E_q, thresh_g, drifters, G, W, Y, X_presented):
     growth_size = max(0, len(shp[E_q >= thresh_g]) - len(drifters))
@@ -235,7 +234,7 @@ def train_for_batch(X_presented, i, max_its,  lrst, lrdec, im_neix, W, max_epoch
         x = X_presented[k]
         tau = (i * X_presented.shape[0] + k) * 1. / (max_its * X_presented.shape[0])
         lr = np.float32(lrst * ((1 - tau)) ** lrdec)
-        so_lr = lr ** 1.5 # np.float32(so_lr_st * (1-tau)** lrdec)
+        so_lr = lrst * np.exp(-4 * tau ** 2) # np.float32(so_lr_st * (1-tau)** lrdec)
         nei_len = np.int32(min(im_neix, W.shape[0]))
 
         dist_H, neilist = pairwise_and_neighbors(x, W, nei_len)
@@ -250,7 +249,7 @@ def train_for_batch(X_presented, i, max_its,  lrst, lrdec, im_neix, W, max_epoch
         nei_bin = (G[b] + G[:, b]) > 0
         neighbors = shp[nei_bin]
 
-        denom = dist_H[neilist[0]]
+        denom = dist_H[neilist[-1]]
 
         epoch_vector = max_epochs_per_sample * (tau*(G[b] + G[:, b]) / 2. + 1)
         neg_epoch_vector = 1 * ns_rate * (1 - tau*(G[b] + G[:, b]) / 2.)
@@ -268,7 +267,7 @@ def train_for_batch(X_presented, i, max_its,  lrst, lrdec, im_neix, W, max_epoch
 def train_for_input(x, X_presented, i, k, max_its, lrst, lrdec, im_neix, W, max_epochs_per_sample, G, epsilon,min_strength, shp, Y, ns_rate, alpha, beta, rng_state, E_q ):
     tau = (i * X_presented.shape[0] + k) * 1. / (max_its * X_presented.shape[0])
     lr = np.float32(lrst * ((1 - tau)) ** lrdec)
-    so_lr = lr  # np.float32(so_lr_st * (1-tau)** lrdec)
+    so_lr = lrst * np.exp(-4 * tau ** 2)  # np.float32(so_lr_st * (1-tau)** lrdec)
     nei_len = np.int64(min(im_neix, W.shape[0]))
 
     dist_H, neilist = pairwise_and_neighbors(x, W, nei_len)
@@ -288,7 +287,7 @@ def train_for_input(x, X_presented, i, k, max_its, lrst, lrdec, im_neix, W, max_
     # nei_bin = (G[b] + G[:, b]) > 0
     neighbors = shp[(G[b] + G[:, b]) > 0]
 
-    denom = dist_H[neilist[0]]
+    denom = dist_H[neilist[-1]]
 
     epoch_vector = max_epochs_per_sample *  (tau*(G[b] + G[:, b]) / 2. + 1)
 
@@ -391,16 +390,13 @@ def train_embedding(Y, neighbors, alpha, beta ,lr, b, neg_samples, rng_state, ep
 
     return Y
 
-
-
-
-@numba.njit('f4[:,:](f4, f4[:,:], f4[:, :], i4, f4, i4, i4, i8, f4, f4, i8[:], i8, f4 )', fastmath = True, parallel = True)
-def embed_batch_epochs(lrst, Y, G, max_its, lrdec, i_st, i_end, ns_rate, alpha, beta, rng_state, max_epochs_per_sample, min_strength):
+@numba.njit('f4[:,:](f4, f4[:,:], f4[:, :], i4, i4, i4, f4, f4, i8[:] )', fastmath = True, parallel = True)
+def embed_batch_epochs(lrst, Y, G, max_its, i_st, i_end, alpha, beta, rng_state):
     shp = np.arange(G.shape[0]).astype(np.int32)
     P_matrix = (G + G.T) / 2.
     tau = (i_st) * 1. / (max_its)
-    tau_end = (i_end) * 1. / max_its
-    epochs_per_sample = ((P_matrix)*5).astype(np.int32)
+    tau_end = min(i_end, max_its) * 1. / max_its
+    epochs_per_sample = ((P_matrix)).astype(np.int32)
 
     starting_lr = (1-tau) * lrst
     ending_lr = (1-tau_end) * lrst
@@ -409,48 +405,44 @@ def embed_batch_epochs(lrst, Y, G, max_its, lrdec, i_st, i_end, ns_rate, alpha, 
     totits = np.sum(epochs_per_sample)
     updated = 0
 
-    while np.any(epochs_per_sample>0):
-        pos_edges = np.where(epochs_per_sample)
-        n_edges = len(pos_edges[0])
-        for p in range(n_edges):
-            j = pos_edges[0][tau_rand_int(rng_state) % n_edges]
-            lr = starting_lr + (ending_lr - starting_lr) * (updated * 1./totits)
-            neighbors = shp[G[j] + G[:, j] > 0]
+    pos_edges = np.where(epochs_per_sample)
+    n_edges = len(pos_edges[0])
+    for p in range(n_edges):
+        j = pos_edges[0][p]
+        lr = (starting_lr + (ending_lr - starting_lr) * (updated * 1./totits))
+        neighbors = shp[G[j] + G[:, j] > 0]
+        for k in range(neighbors.shape[0]):
+            epochs = epochs_per_sample[j][neighbors[k]]
+            epochs_per_sample[j][neighbors[k]] = 0
+            neg_epochs = int(epochs_per_negative_sample[j][neighbors[k]])
 
-            for k in range(neighbors.shape[0]):
-                epochs = epochs_per_sample[j][neighbors[k]]
-                epochs_per_sample[j][neighbors[k]] -= 1
-                neg_epochs = int(epochs_per_negative_sample[j][neighbors[k]])
+            for ep in range(epochs):
+                for negs in range(neg_epochs):
+                    n = tau_rand_int(rng_state) % Y.shape[0]
+                    current_neg_epochs = epochs_per_negative_sample[j][n]
+                    epochs_per_negative_sample[j][n] -= 1
+                    if current_neg_epochs > 0:
+                        ldist_sq = rdist(Y[j], Y[n])
+                        push_grad = (2 * beta)
+                        denom = 1 + alpha * pow(ldist_sq, beta)
+                        push_grad /= denom
+                        for i in range(Y[j].shape[0]):
+                            if ldist_sq > 0.:
+                                Y[j][i] += positive_clip(push_grad / (ldist_sq + 0.001) * (Y[j][i] - Y[n][i]), 4) * lr
+                            elif j == n:
+                                continue
+                            else:
+                                Y[j][i] += lr
+                ldist_sq = rdist(Y[j], Y[neighbors[k]])
 
-                if epochs > 0:
-                    neg_samples_done = 0
-                    while neg_samples_done < neg_epochs:
-                        n = tau_rand_int(rng_state) % Y.shape[0]
-                        current_neg_epochs = epochs_per_negative_sample[j][n]
-                        if current_neg_epochs > 0:
-                            neg_samples_done += 1
-                            epochs_per_negative_sample[j][n] -= 1
-                            ldist_sq = rdist(Y[j], Y[n])
-                            push_grad = (2 * beta) * epochs_per_negative_sample[j][neighbors[k]]
-                            denom = 1 + alpha * pow(ldist_sq, beta)
-                            push_grad /= denom
-                            for i in range(Y[j].shape[0]):
-                                if ldist_sq > 0.:
-                                    Y[j][i] += positive_clip(push_grad / (ldist_sq + 0.001) * (Y[j][i] - Y[n][i]), 4) * lr
-                                elif j == n:
-                                    continue
-                                else:
-                                    Y[j][i] += lr
-                    ldist_sq = rdist(Y[j], Y[neighbors[k]])
+                pull_grad = (2 * alpha * beta * pow(ldist_sq, beta - 1))
+                denom = (1 + alpha * pow(ldist_sq, beta))
+                pull_grad /= denom
 
-                    pull_grad = (2 * alpha * beta * pow(ldist_sq, beta - 1)) #* epochs
-                    denom = (1 + alpha * pow(ldist_sq, beta))
-                    pull_grad /= denom
-
-                    for i in range(Y[j].shape[0]):
-                        Y[neighbors[k]][i] += positive_clip(pull_grad * (Y[j][i] - Y[neighbors[k]][i]), 4) * lr
-                        Y[j][i] -= positive_clip(pull_grad * (Y[j][i] - Y[neighbors[k]][i]), 4) * lr
-                    updated += 1
+                for i in range(Y[j].shape[0]):
+                    Y[neighbors[k]][i] += positive_clip(pull_grad * (Y[j][i] - Y[neighbors[k]][i]), 4) * lr
+                    Y[j][i] -= positive_clip(pull_grad * (Y[j][i] - Y[neighbors[k]][i]), 4) * lr
+                updated += 1
 
     return Y
 
