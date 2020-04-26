@@ -8,6 +8,12 @@ To install this package, download the zip file, extract it, and run the followin
 
 ``$ python setup.py install``
 
+Alternatively, you can use pip to install this package as follows
+
+``$ cd <extracted_location>``
+
+``$ pip install .``
+
 ## Running The Algorithm
 
 In python, after installation, run the following. 
