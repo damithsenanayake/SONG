@@ -261,8 +261,8 @@ class SONG(BaseEstimator):
                     else:
                         '''(X_presented, i, max_its,  lrst, lrdec, im_neix, W, order, G, epsilon, min_strength, shp, Y, ns_rate, alpha, beta, rng_state, E_q)'''
                         if verbose :
-                            print('\r Training with Self Organization for all presented inputs in this batch i = {} , |X| = {} , |G| = {}  '.format(i+1, presented_len, G.shape[0] ),
-                        W, Y, G, E_q = train_for_batch(X_presented, i, self.max_its, lrst, lrdec, im_neix, W, self.max_epochs_per_sample, G, epsilon, self.min_strength, shp, Y, self.ns_rate, alpha, beta, self.rng_state, E_q), end='')
+                            print('\r Training with Self Organization for all presented inputs in this batch i = {} , |X| = {} , |G| = {}  '.format(i+1, presented_len, G.shape[0] ),end = '')
+                        W, Y, G, E_q = train_for_batch(X_presented, i, self.max_its, lrst, lrdec, im_neix, W, self.max_epochs_per_sample, G, epsilon, self.min_strength, shp, Y, self.ns_rate, alpha, beta, self.rng_state, E_q)
 
                     drifters = shp[(G > 0).sum(axis=0) < im_neix]
                     skip = 0
