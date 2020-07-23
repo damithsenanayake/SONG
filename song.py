@@ -2,7 +2,8 @@ import numpy as np
 from sklearn.metrics.pairwise import pairwise_distances_argmin
 from sklearn.manifold import SpectralEmbedding
 from sklearn.base import BaseEstimator
-from util import  find_spread_tightness, train_for_input, train_for_batch, bulk_grow, embed_batch_epochs
+from util import  find_spread_tightness, \
+     train_for_input, train_for_batch, bulk_grow, embed_batch_epochs
 
 INT32_MIN = np.iinfo(np.int32).min + 1
 INT32_MAX = np.iinfo(np.int32).max - 1
@@ -16,7 +17,8 @@ class SONG(BaseEstimator):
                  gamma=None,
                  init=None,
                  agility=0.8, verbose=0,
-                 random_seed=1, epsilon=0.05, a = None, b = None, final_vector_count = 20000):
+                 max_age = 1,
+                 random_seed=1, epsilon=0.005, a = None, b = None, final_vector_count = 20000):
         ''' Initialize a SONG to reduce data.
 
         === General Hyperparameters ===
@@ -73,6 +75,7 @@ class SONG(BaseEstimator):
         self.alpha = a
         self.beta = b
         self.prototypes = final_vector_count
+        self.max_age = max_age
 
     def fit(self, X):
         '''
@@ -84,8 +87,8 @@ class SONG(BaseEstimator):
         verbose = self.verbose
         min_dist = self.min_dist
         spread = self.spread
-        self.ss = 10
-        self.max_its = self.ss * 10
+        self.ss = 12
+        self.max_its = self.ss * 2
         if self.alpha == None and self.beta == None :
             alpha, beta = find_spread_tightness(spread, min_dist)
         else:
@@ -98,8 +101,12 @@ class SONG(BaseEstimator):
             self.sf = np.log(4) / (2 * self.ss)
         thresh_g = -X.shape[1] * np.log(self.sf) * (scale)
 
+        # try:
         so_lr_st = self.lrst#self.so_lr_st
-
+        # except:
+        #     so_lr_st = min(1, 4./np.log10(X.shape[0]))
+        if verbose:
+            print('starting lr for self organization : ' + str(so_lr_st))
         ''' Initialize coding vector weights and output coordinate system  '''
         ''' index of the last nearest neighbor : depends on output dimensionality. Higher the output dimensionality, 
                        higher the connectedness '''
@@ -158,13 +165,15 @@ class SONG(BaseEstimator):
         so_sched = np.unique((t_normalized[t_ixs] * self.max_its).astype(int))[:self.ss]
         soeds = np.arange(self.ss)
         sratios = 1 - ((soeds) * 1. / (self.ss - 1))
-        batch_sizes = X.shape[0] * np.exp(-gamma * sratios**2)
+        batch_sizes = X.shape[0] * np.exp(-gamma * sratios ** 2)
         epsilon = self.epsilon
-        self.min_strength = epsilon ** (self.dim + 2)
+        self.min_strength = epsilon ** (self.dim + self.max_age)
         no_so_ss = so_sched[1]-so_sched[0]
         next_so = so_sched[soed]
         non_growing_iter = 0
         drifters = []
+
+        last_iter = False
 
         for i in range(self.max_its):
 
@@ -181,7 +190,7 @@ class SONG(BaseEstimator):
                         try:
                             next_so = so_sched[soed]
                         except:
-                            pass
+                            last_iter = True
                     so_iter = 1
 
                 growing_iter = i == 0
@@ -247,25 +256,26 @@ class SONG(BaseEstimator):
                             if not np.mod(k, 500) and verbose:
                                 print('\r |G|= %i , alpha: %.4f, beta: %.5f , iter = %i , X_i = %i/%i, Neighbors: %i, lr : %.4f' % (
                                     G.shape[0], alpha, beta, i + 1, k, X_presented.shape[0], neighbors.shape[0],
-                                    float(lr))),
+                                    float(lr)), end='')
 
                     else:
                         '''(X_presented, i, max_its,  lrst, lrdec, im_neix, W, order, G, epsilon, min_strength, shp, Y, ns_rate, alpha, beta, rng_state, E_q)'''
                         if verbose :
-                            print ('\r Training with Self Organization for all presented inputs in this batch i = {} , |X| = {} , |G| = {}  '.format(i+1, presented_len, G.shape[0] ), end='')
-                        W, Y, G, E_q = train_for_batch(X_presented, i, self.max_its, lrst, lrdec, im_neix, W, self.max_epochs_per_sample, G, epsilon, self.min_strength, shp, Y, self.ns_rate, alpha, beta, self.rng_state, E_q)
+                            print('\r Training with Self Organization for all presented inputs in this batch i = {} , |X| = {} , |G| = {}  '.format(i+1, presented_len, G.shape[0] ),
+                        W, Y, G, E_q = train_for_batch(X_presented, i, self.max_its, lrst, lrdec, im_neix, W, self.max_epochs_per_sample, G, epsilon, self.min_strength, shp, Y, self.ns_rate, alpha, beta, self.rng_state, E_q), end='')
 
                     drifters = shp[(G > 0).sum(axis=0) < im_neix]
                     skip = 0
                 else:
-                    if not skip > 0:
+                    if not skip > (1 ):
                         skip += 1
                         embed_length = len(X_presented)
                         if verbose:
                             print('\rTraining iteration %i without self organization :  Map size : %i, SOED : %i , Batch Size : %i' % (
-                            i + 1, G.shape[0], soed, embed_length), end='')
+                            i + 1, G.shape[0], soed, embed_length),end='')
 
-                        Y = embed_batch_epochs(lrst, Y, G, self.max_its, i, no_so_ss + i, alpha, beta, self.rng_state)
+                        for _ in range(1 if not last_iter else 10):
+                            Y = embed_batch_epochs(lrst, Y, G, self.max_its, i, no_so_ss + i, alpha, beta, self.rng_state)
 
                         non_growing_iter += 1
 
@@ -284,3 +294,7 @@ class SONG(BaseEstimator):
     def transform(self, X):
         min_dist_args = pairwise_distances_argmin(X, self.W)
         return self.Y[min_dist_args]
+
+    def get_representatives(self, X):
+        min_dist_args = pairwise_distances_argmin(X, self.W)
+        return min_dist_args
