@@ -383,7 +383,7 @@ def embed_batch_epochs(lrst, Y, G, max_its, i_st, i_end, alpha, beta, rng_state)
     shp = np.arange(G.shape[0]).astype(np.int32)
     P_matrix = (G + G.T) / 2.
     tau = (i_st) * 1. / (max_its)
-    tau_end = min(i_end, max_its) * 1. / max_its
+    tau_end = min(i_end, max_its) * 1. / (max_its)
     epochs_per_sample = ((P_matrix)).astype(np.int32)
 
     starting_lr = (1 - tau)

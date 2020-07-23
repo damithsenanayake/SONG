@@ -87,7 +87,11 @@ class SONG(BaseEstimator):
         verbose = self.verbose
         min_dist = self.min_dist
         spread = self.spread
-        self.ss = 12
+        self.ss = 20 if X.shape[0] < 10000 else 10
+        min_batch = 500 if X.shape[0] > 10000 else X.shape[0]
+        if X.shape[0] > 100000:
+            min_batch = 1000
+            self.ss = 4
         self.max_its = self.ss * 2
         if self.alpha == None and self.beta == None :
             alpha, beta = find_spread_tightness(spread, min_dist)
@@ -156,10 +160,10 @@ class SONG(BaseEstimator):
         step_size = self.max_its *1. / self.ss
 
         t_ixs = (np.arange(self.ss) * step_size).astype(np.int)
-        lrdec = 1
+        lrdec = 1.
 
         if self.gamma == None:
-            gamma = - np.log(min(500., X.shape[0]) * 1. / X.shape[0])
+            gamma = - np.log(min(min_batch, X.shape[0]) * 1. / X.shape[0])
         else:
             gamma = self.gamma
         so_sched = np.unique((t_normalized[t_ixs] * self.max_its).astype(int))[:self.ss]
@@ -261,7 +265,7 @@ class SONG(BaseEstimator):
                     else:
                         '''(X_presented, i, max_its,  lrst, lrdec, im_neix, W, order, G, epsilon, min_strength, shp, Y, ns_rate, alpha, beta, rng_state, E_q)'''
                         if verbose :
-                            print('\r Training with Self Organization for all presented inputs in this batch i = {} , |X| = {} , |G| = {}  '.format(i+1, presented_len, G.shape[0] ),end = '')
+                            print('\r Training with Self Organization for all presented inputs in this batch i = {} , |X| = {} , |G| = {}  '.format(i+1, presented_len, G.shape[0] ), end = '')
                         W, Y, G, E_q = train_for_batch(X_presented, i, self.max_its, lrst, lrdec, im_neix, W, self.max_epochs_per_sample, G, epsilon, self.min_strength, shp, Y, self.ns_rate, alpha, beta, self.rng_state, E_q)
 
                     drifters = shp[(G > 0).sum(axis=0) < im_neix]
@@ -272,10 +276,10 @@ class SONG(BaseEstimator):
                         embed_length = len(X_presented)
                         if verbose:
                             print('\rTraining iteration %i without self organization :  Map size : %i, SOED : %i , Batch Size : %i' % (
-                            i + 1, G.shape[0], soed, embed_length),end='')
-
-                        for _ in range(1 if not last_iter else 10):
-                            Y = embed_batch_epochs(lrst, Y, G, self.max_its, i, no_so_ss + i, alpha, beta, self.rng_state)
+                            i + 1, G.shape[0], soed, embed_length), end = '')
+                        repeats = 1# if not last_iter else 10
+                        for repeat in range(repeats):
+                            Y = embed_batch_epochs(lrst, Y, G, self.max_its + repeats -1, i + repeat, no_so_ss + i, alpha, beta, self.rng_state)
 
                         non_growing_iter += 1
 
