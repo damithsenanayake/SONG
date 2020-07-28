@@ -33,8 +33,8 @@ def tau_rand_int(state):
 def pairwise_and_neighbors(x, W, n_neis):
     dists_2 = np.ones(W.shape[0], dtype=np.float32) * np.float32(np.inf)
     neinds = np.ones(n_neis, dtype=np.int32)
-    n_W = np.int64(W.shape[0])
-    n_dim = np.int64(W.shape[1])
+    n_W = np.int32(W.shape[0])
+    n_dim = np.int32(W.shape[1])
     for i in range(n_W):
         w = W[i]
         dist2 = np.float32(0)
@@ -95,7 +95,8 @@ def rdist(x, y):
     return dist
 
 
-def bulk_grow(shp, E_q, thresh_g, drifters, G, W, Y, X_presented):
+@numba.njit()
+def bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y, X_presented):
     growth_size = max(0, len(shp[E_q >= thresh_g]) - len(drifters))
 
     if growth_size and G.shape[0] < 10000 and G.shape[0] < X_presented.shape[0]:
@@ -158,6 +159,59 @@ def bulk_grow(shp, E_q, thresh_g, drifters, G, W, Y, X_presented):
     return W, G, Y, E_q, drifters
 
 
+@numba.njit()
+def bulk_grow_sans_drifters(shp, E_q, thresh_g, G, W, Y, X_presented):
+    growth_size = max(0, len(shp[E_q >= thresh_g]))
+
+    if growth_size and G.shape[0] < 10000 and G.shape[0] < X_presented.shape[0]:
+        oldG = G
+        oldW = W
+        oldY = Y
+        oldE = E_q
+        old_size = oldW.shape[0]
+        W = np.zeros((W.shape[0] + growth_size, W.shape[1]), dtype=np.float32)
+        W[:-growth_size] = oldW
+
+        Y = np.zeros((Y.shape[0] + growth_size, Y.shape[1]), dtype=np.float32)
+        Y[: -growth_size] = oldY
+
+        G = np.zeros((G.shape[0] + growth_size, G.shape[1] + growth_size), dtype=np.float32)
+        G[:-growth_size][:, :-growth_size] = oldG
+
+        E_q = np.zeros(E_q.shape[0] + growth_size, dtype=np.float32)
+        E_q[:-growth_size] = oldE
+
+        grown = 0
+        shp = np.arange(G.shape[0]).astype(np.int32)
+        growing_nodes = shp[E_q >= thresh_g]
+
+        if len(growing_nodes) > 1:
+            for k in range(len(growing_nodes)):
+                b = growing_nodes[k]
+                ''' If no reusable nodes create new nodes'''
+                closests = shp[G[b] == 1]
+                W_n = W[closests].sum(axis=0) / len(closests)
+                Y_n = Y[closests].sum(axis=0) / len(closests)
+                W[old_size + grown ] = W_n
+
+                Y[old_size + grown ] = Y_n
+                ''' connect neighbors to the new node '''
+                G[old_size + grown ][b] = 1
+                G[b][old_size + grown ] = 0
+                G[old_size + grown ][closests] = 1
+                G[closests][:, old_size + grown ] = 0
+
+                ''' Append new error. '''
+                E_q[old_size + grown ] = 0
+
+                G[b][closests] = 0
+                G[closests][:, b] = 0
+                E_q[closests] = 0.5
+                grown += 1
+
+    return W, G, Y, E_q
+
+@numba.njit(fastmath=True)
 def bulk_grow_with_gen(shp, E_q, thresh_g, drifters, G, W, Y, X_presented, birth_gen, last_gen):
     growth_size = max(0, len(shp[E_q >= thresh_g]) - len(drifters))
 
@@ -231,7 +285,7 @@ def bulk_grow_with_gen(shp, E_q, thresh_g, drifters, G, W, Y, X_presented, birth
 
 @numba.njit('f4(f4)', fastmath=True)
 def get_so_rate(tau):
-    return  np.exp(-3 * tau**1) #if tau < 0.8 else np.exp(-5 * tau ** 2)
+    return  np.exp(-3 * tau) #if tau < 0.8 else np.exp(-5 * tau ** 2)
 
 @numba.njit(fastmath=True, )
 def train_for_batch(X_presented, i, max_its, lrst, lrdec, im_neix, W, max_epochs_per_sample, G, epsilon, min_strength,
@@ -239,15 +293,15 @@ def train_for_batch(X_presented, i, max_its, lrst, lrdec, im_neix, W, max_epochs
 
     dampen = 1
 
-    if W.shape[0] <= im_neix ** 2:
+    if W.shape[0] <= pow(im_neix, 2):
 
         dampen = (W.shape[0] * 1./X_presented.shape[0])
 
     for k in range(len(X_presented)):
         x = X_presented[k]
         tau = np.float32((i * X_presented.shape[0] + k) * 1. / (max_its * X_presented.shape[0]))
-        lr = np.float32(((1 - tau)) ** lrdec) * dampen
-        so_lr = lrst * get_so_rate(tau)# * G.shape[0] *1./ X_presented.shape[0]#st * np.exp(-7 * tau ** 2)  # np.float32(so_lr_st * (1-tau)** lrdec)
+        lr = np.float32((pow((1 - tau) , lrdec))) * dampen
+        so_lr = lrst*get_so_rate(tau)# * G.shape[0] *1./ X_presented.shape[0]#st * np.exp(-7 * tau ** 2)  # np.float32(so_lr_st * (1-tau)** lrdec)
         nei_len = np.int32(min(im_neix, W.shape[0]))
 
         dist_H, neilist = pairwise_and_neighbors(x, W, nei_len)
@@ -282,12 +336,12 @@ def train_for_batch(X_presented, i, max_its, lrst, lrdec, im_neix, W, max_epochs
 def train_for_input(x, X_presented, i, k, max_its, lrst, lrdec, im_neix, W, max_epochs_per_sample, G, epsilon,
                     min_strength, shp, Y, ns_rate, alpha, beta, rng_state, E_q):
     dampen = 1
-    if W.shape[0] <= im_neix ** 2:
+    if W.shape[0] <= pow(im_neix , 2):
         dampen = (W.shape[0] * 1. / X_presented.shape[0])
 
     tau = np.float32((i * X_presented.shape[0] + k) * 1. / (max_its * X_presented.shape[0]))
-    lr = np.float32(((1 - tau)) ** lrdec) * dampen
-    so_lr = lrst * get_so_rate(tau)
+    lr = np.float32((pow((1 - tau) , lrdec))) * dampen
+    so_lr = lrst*get_so_rate(tau)
     nei_len = np.int64(min(im_neix, W.shape[0]))
 
     dist_H, neilist = pairwise_and_neighbors(x, W, nei_len)
@@ -333,7 +387,7 @@ def train_neighborhood(x, so_lr, b, neighbors, W, hdist_nei, Y, ns_rate, alpha, 
     hdists = hdist_nei
     y_b = Y[b]
     ''' Self Organizing '''
-    sigma = 2.
+    sigma = 1.
     for j in range(W.shape[0]):
         hdist = hdists[j]
         if neighbors[j] == b:
@@ -383,7 +437,7 @@ def embed_batch_epochs(lrst, Y, G, max_its, i_st, i_end, alpha, beta, rng_state)
     shp = np.arange(G.shape[0]).astype(np.int32)
     P_matrix = (G + G.T) / 2.
     tau = (i_st) * 1. / (max_its)
-    tau_end = min(i_end, max_its) * 1. / (max_its)
+    tau_end = 1.
     epochs_per_sample = ((P_matrix)).astype(np.int32)
 
     starting_lr = (1 - tau)

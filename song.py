@@ -3,7 +3,7 @@ from sklearn.metrics.pairwise import pairwise_distances_argmin
 from sklearn.manifold import SpectralEmbedding
 from sklearn.base import BaseEstimator
 from util import  find_spread_tightness, \
-     train_for_input, train_for_batch, bulk_grow, embed_batch_epochs
+     train_for_input, train_for_batch, bulk_grow_with_drifters, bulk_grow_sans_drifters, embed_batch_epochs
 
 INT32_MIN = np.iinfo(np.int32).min + 1
 INT32_MAX = np.iinfo(np.int32).max - 1
@@ -11,14 +11,14 @@ INT32_MAX = np.iinfo(np.int32).max - 1
 
 class SONG(BaseEstimator):
 
-    def __init__(self, out_dim=2, n_neighbors=1,
+    def __init__(self, out_dim=2, n_neighbors=3,
                  lr=1., spread_factor=0.9,
                  spread=1., min_dist=0.1, ns_rate=5,
                  gamma=None,
                  init=None,
                  agility=0.8, verbose=0,
                  max_age = 1,
-                 random_seed=1, epsilon=0.005, a = None, b = None, final_vector_count = 20000):
+                 random_seed=1, epsilon=1e-10, a = None, b = None, final_vector_count = 20000):
         ''' Initialize a SONG to reduce data.
 
         === General Hyperparameters ===
@@ -90,8 +90,8 @@ class SONG(BaseEstimator):
         self.ss = 20 if X.shape[0] < 10000 else 10
         min_batch = 500 if X.shape[0] > 10000 else X.shape[0]
         if X.shape[0] > 100000:
-            min_batch = 1000
-            self.ss = 4
+            min_batch = 25000
+            self.ss = 8
         self.max_its = self.ss * 2
         if self.alpha == None and self.beta == None :
             alpha, beta = find_spread_tightness(spread, min_dist)
@@ -213,7 +213,10 @@ class SONG(BaseEstimator):
                     else:
                         max_nodes = self.prototypes
                     if not self.prototypes == None and self.prototypes >= G.shape[0]:
-                        W, G, Y, E_q, drifters = bulk_grow(shp, E_q, thresh_g, drifters, G, W, Y, X_presented)
+                        if len(drifters) >0:
+                            W, G, Y, E_q, drifters = bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y, X_presented)
+                        else:
+                            W, G, Y, E_q =  bulk_grow_sans_drifters(shp, E_q, thresh_g, G, W, Y, X_presented)
                     shp = np.arange(G.shape[0])
 
                     if E_q.sum() == 0 :
@@ -274,12 +277,13 @@ class SONG(BaseEstimator):
                     if not skip > (1 ):
                         skip += 1
                         embed_length = len(X_presented)
+                        G[G<self.min_strength]=0
                         if verbose:
                             print('\rTraining iteration %i without self organization :  Map size : %i, SOED : %i , Batch Size : %i' % (
                             i + 1, G.shape[0], soed, embed_length), end = '')
                         repeats = 1# if not last_iter else 10
                         for repeat in range(repeats):
-                            Y = embed_batch_epochs(lrst, Y, G, self.max_its + repeats -1, i + repeat, no_so_ss + i, alpha, beta, self.rng_state)
+                            Y = embed_batch_epochs(lrst, Y, G, self.max_its + repeats -1, i , no_so_ss + i, alpha, beta, self.rng_state)
 
                         non_growing_iter += 1
 
