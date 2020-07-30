@@ -1,9 +1,11 @@
 import numpy as np
 from sklearn.metrics.pairwise import pairwise_distances_argmin
+from scipy.spatial.distance import  cdist
 from sklearn.manifold import SpectralEmbedding
 from sklearn.base import BaseEstimator
-from util import  find_spread_tightness, \
-     train_for_input, train_for_batch, bulk_grow_with_drifters, bulk_grow_sans_drifters, embed_batch_epochs
+from util import find_spread_tightness, \
+    train_for_input, train_for_batch_online, bulk_grow_with_drifters, bulk_grow_sans_drifters, embed_batch_epochs, \
+    interleaved_growth, train_for_batch_batch
 
 INT32_MIN = np.iinfo(np.int32).min + 1
 INT32_MAX = np.iinfo(np.int32).max - 1
@@ -17,8 +19,8 @@ class SONG(BaseEstimator):
                  gamma=None,
                  init=None,
                  agility=0.8, verbose=0,
-                 max_age = 1,
-                 random_seed=1, epsilon=1e-10, a = None, b = None, final_vector_count = 20000):
+                 max_age=1,
+                 random_seed=1, epsilon=1e-10, a=None, b=None, final_vector_count=20000):
         ''' Initialize a SONG to reduce data.
 
         === General Hyperparameters ===
@@ -87,28 +89,23 @@ class SONG(BaseEstimator):
         verbose = self.verbose
         min_dist = self.min_dist
         spread = self.spread
-        self.ss = 20 if X.shape[0] < 10000 else 10
-        min_batch = 500 if X.shape[0] > 10000 else X.shape[0]
-        if X.shape[0] > 100000:
-            min_batch = 25000
-            self.ss = 8
+        self.ss = 12  # 0 if X.shape[0] < 10000 else 12
+        min_batch = 400  # if X.shape[0] > 10000 else X.shape[0]
         self.max_its = self.ss * 2
-        if self.alpha == None and self.beta == None :
+        if self.alpha == None and self.beta == None:
             alpha, beta = find_spread_tightness(spread, min_dist)
         else:
             alpha = self.alpha
             beta = self.beta
-        scale = np.median(np.linalg.norm(X, axis=1))**2.
+        scale = np.median(np.linalg.norm(X, axis=1)) ** 2.
         if verbose:
             print("alpha : {} beta : {}".format(alpha, beta))
         if self.sf == None:
             self.sf = np.log(4) / (2 * self.ss)
         thresh_g = -X.shape[1] * np.log(self.sf) * (scale)
 
-        # try:
-        so_lr_st = self.lrst#self.so_lr_st
-        # except:
-        #     so_lr_st = min(1, 4./np.log10(X.shape[0]))
+        so_lr_st = self.lrst
+
         if verbose:
             print('starting lr for self organization : ' + str(so_lr_st))
         ''' Initialize coding vector weights and output coordinate system  '''
@@ -132,8 +129,9 @@ class SONG(BaseEstimator):
             ''' If the model is not already initialized ...'''
             if self.init == None:
                 init_size = im_neix
-                W = X[self.random_state.choice(X.shape[0], init_size)] + self.random_state.random_sample((init_size, X.shape[1])).astype(np.float32)*0.0001
-                Y = self.random_state.random_sample((init_size, self.dim)).astype(np.float32) #/ self.min_dist
+                W = X[self.random_state.choice(X.shape[0], init_size)] + self.random_state.random_sample(
+                    (init_size, X.shape[1])).astype(np.float32) * 0.0001
+                Y = self.random_state.random_sample((init_size, self.dim)).astype(np.float32)  # / self.min_dist
                 if verbose:
                     print('random map initialization')
 
@@ -148,151 +146,117 @@ class SONG(BaseEstimator):
 
         lrst = self.lrst
 
-        presented_len = 0
-
+        presented_len = X.shape[0]
         order = self.random_state.permutation(X.shape[0])
-
         soed = 0
-
-        t_normalized = np.arange(self.max_its).astype(float)
-        t_normalized /= (t_normalized.max())
-
-        step_size = self.max_its *1. / self.ss
-
-        t_ixs = (np.arange(self.ss) * step_size).astype(np.int)
         lrdec = 1.
-
-        if self.gamma == None:
-            gamma = - np.log(min(min_batch, X.shape[0]) * 1. / X.shape[0])
-        else:
-            gamma = self.gamma
-        so_sched = np.unique((t_normalized[t_ixs] * self.max_its).astype(int))[:self.ss]
         soeds = np.arange(self.ss)
-        sratios = 1 - ((soeds) * 1. / (self.ss - 1))
-        batch_sizes = X.shape[0] * np.exp(-gamma * sratios ** 2)
+        sratios = ((soeds) * 1. / (self.ss - 1))
+        batch_sizes = (X.shape[0] - min_batch) * sratios ** 2 + min_batch
         epsilon = self.epsilon
-        self.min_strength = epsilon ** (self.dim + self.max_age)
-        no_so_ss = so_sched[1]-so_sched[0]
-        next_so = so_sched[soed]
+
         non_growing_iter = 0
         drifters = []
-
-        last_iter = False
-
         for i in range(self.max_its):
-
-                so_iter = 0 if self.ss <= self.max_its else 1
-
-                if i == next_so :
-                    order = self.random_state.permutation(X.shape[0])
-
-                    presented_len = int(batch_sizes[soed])
-
-                    soed += 1
-
-                    if soed  < self.ss:
-                        try:
-                            next_so = so_sched[soed]
-                        except:
-                            last_iter = True
-                    so_iter = 1
-
-                growing_iter = i == 0
-
-
-                X_presented = X[order[:presented_len]]
-                non_growing_iter += 1
-                if so_iter:
-                    non_growing_iter = 0
-
-                    k = 0
-
-                    shp = np.arange(G.shape[0]).astype(np.int32)
-                    if self.prototypes == None:
-                        max_nodes = 2000
+            order = self.random_state.permutation(X.shape[0])
+            self.min_strength = epsilon ** ((self.dim + self.max_age) * ( i > self.max_its//2) )
+            so_iter = 0 if self.ss <= self.max_its else 1
+            if not i % 2:
+                presented_len = int(batch_sizes[soed])
+                soed += 1
+                so_iter = 1
+            growing_iter = i == 0
+            X_presented = X[order[:presented_len]]
+            non_growing_iter += 1
+            if so_iter:
+                non_growing_iter = 0
+                k = 0
+                shp = np.arange(G.shape[0]).astype(np.int32)
+                if self.prototypes == None:
+                    max_nodes = 2000
+                else:
+                    max_nodes = self.prototypes
+                if not self.prototypes == None and self.prototypes >= G.shape[0]:
+                    if len(drifters) > 0:
+                        W, G, Y, E_q, drifters = bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y,
+                                                                         X_presented)
                     else:
-                        max_nodes = self.prototypes
-                    if not self.prototypes == None and self.prototypes >= G.shape[0]:
-                        if len(drifters) >0:
-                            W, G, Y, E_q, drifters = bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y, X_presented)
-                        else:
-                            W, G, Y, E_q =  bulk_grow_sans_drifters(shp, E_q, thresh_g, G, W, Y, X_presented)
-                    shp = np.arange(G.shape[0])
+                        W, G, Y, E_q = bulk_grow_sans_drifters(shp, E_q, thresh_g, G, W, Y, X_presented)
+                shp = np.arange(G.shape[0], dtype=np.int32)
 
-                    if E_q.sum() == 0 :
+                if E_q.sum() == 0:
+                    for x in X_presented:
+                        W, Y, G, E_q, k, b, neilist, neighbors, lr = train_for_input(x, X_presented, i, k, self.max_its,
+                                                                                     lrst, lrdec, im_neix, W,
+                                                                                     self.max_epochs_per_sample,
+                                                                                     G, epsilon, self.min_strength, shp,
+                                                                                     Y, self.ns_rate, alpha, beta,
+                                                                                     self.rng_state, E_q)
 
-                        for x in X_presented:
-
-                            W, Y, G, E_q, k, b, neilist, neighbors, lr = train_for_input(x, X_presented, i, k, self.max_its, lrst, lrdec, im_neix, W, self.max_epochs_per_sample,
-                                                G, epsilon, self.min_strength, shp, Y, self.ns_rate, alpha, beta, self.rng_state, E_q)
-
-                            if (growing_iter or X_presented.shape[0] < 2500) and G.shape[0] < max_nodes and soed < self.ss:
-                                growth_size = 1
-                                if G.shape[0] < presented_len and thresh_g <= E_q[b]:
-                                    oldG = G
-                                    oldW = W
-                                    oldY = Y
-                                    oldE = E_q
-                                    closests = neilist
-                                    W_n = W[closests].sum(axis=0) / len(closests)
-                                    Y_n = Y[closests].sum(axis=0) / len(closests)
-                                    W = np.zeros((W.shape[0] + growth_size, W.shape[1]), dtype=np.float32)
-                                    W[:-growth_size] = oldW
-                                    W[-growth_size:] = W_n
-                                    Y = np.zeros((Y.shape[0] + growth_size, Y.shape[1]), dtype=np.float32)
-                                    Y[: -growth_size] = oldY
-
-                                    Y[-growth_size:] = Y_n
-                                    G = np.zeros((G.shape[0] + growth_size, G.shape[1] + growth_size), dtype=np.float32)
-                                    G[:-growth_size][:, :-growth_size] = oldG
-                                    ''' connect neighbors to the new node '''
-                                    G[-growth_size:][:, b] = 1
-                                    G[b][-growth_size:] = 1
-                                    G[-growth_size:][:, closests] = 1
-                                    G[closests][-growth_size:] = 1
-                                    G[b][closests] = 0
-                                    G[closests][:, b] = 0
-                                    ''' Append new error. '''
-                                    E_q = np.zeros(E_q.shape[0] + growth_size, dtype=np.float32)
-                                    E_q[:-growth_size] = oldE
-                                    E_q[-growth_size:] = 0
-                                    E_q[closests] *= 0.5
-                                    shp = np.arange(G.shape[0]).astype(np.int32)
-                                    if G.shape[0] >= 2000:
-                                        continue
-                            if not np.mod(k, 500) and verbose:
-                                print('\r |G|= %i , alpha: %.4f, beta: %.5f , iter = %i , X_i = %i/%i, Neighbors: %i, lr : %.4f' % (
+                        if (growing_iter or X_presented.shape[0] < 2500) and G.shape[0] < max_nodes and soed < self.ss:
+                            W, Y, G, E_q, shp = interleaved_growth(b, W, Y, G, E_q, presented_len, thresh_g, neilist,
+                                                                   shp)
+                        if not np.mod(k, 500) and verbose:
+                            print(
+                                '\r |G|= %i , alpha: %.4f, beta: %.5f , iter = %i , X_i = %i/%i, Neighbors: %i, lr : %.4f' % (
                                     G.shape[0], alpha, beta, i + 1, k, X_presented.shape[0], neighbors.shape[0],
                                     float(lr)), end='')
 
-                    else:
-                        '''(X_presented, i, max_its,  lrst, lrdec, im_neix, W, order, G, epsilon, min_strength, shp, Y, ns_rate, alpha, beta, rng_state, E_q)'''
-                        if verbose :
-                            print('\r Training with Self Organization for all presented inputs in this batch i = {} , |X| = {} , |G| = {}  '.format(i+1, presented_len, G.shape[0] ), end = '')
-                        W, Y, G, E_q = train_for_batch(X_presented, i, self.max_its, lrst, lrdec, im_neix, W, self.max_epochs_per_sample, G, epsilon, self.min_strength, shp, Y, self.ns_rate, alpha, beta, self.rng_state, E_q)
-
-                    drifters = shp[(G > 0).sum(axis=0) < im_neix]
-                    skip = 0
                 else:
-                    if not skip > (1 ):
-                        skip += 1
-                        embed_length = len(X_presented)
-                        G[G<self.min_strength]=0
-                        if verbose:
-                            print('\rTraining iteration %i without self organization :  Map size : %i, SOED : %i , Batch Size : %i' % (
-                            i + 1, G.shape[0], soed, embed_length), end = '')
-                        repeats = 1# if not last_iter else 10
-                        for repeat in range(repeats):
-                            Y = embed_batch_epochs(lrst, Y, G, self.max_its + repeats -1, i , no_so_ss + i, alpha, beta, self.rng_state)
+                    '''(X_presented, i, max_its,  lrst, lrdec, im_neix, W, order, G, epsilon, min_strength, shp, Y, ns_rate, alpha, beta, rng_state, E_q)'''
+                    if verbose:
+                        print(
+                            '\r Training with Self Organization for all presented inputs in this batch i = {} , |X| = {} , |G| = {}  '.format(
+                                i + 1, presented_len, G.shape[0]), end='')
+                    if i * 1./self.max_its <= 0.8 or X.shape[0] < 10000:
+                        W, Y, G, E_q = train_for_batch_online(X_presented, i, self.max_its, lrst, lrdec, im_neix, W,
+                                                          self.max_epochs_per_sample, G, epsilon, self.min_strength, shp, Y,
+                                                          self.ns_rate, alpha, beta, self.rng_state, E_q)
+                    else:
+                        too_big = False
+                        try:
+                            pdists = cdist(X_presented, W, 'sqeuclidean').astype(np.float32)
+                        except MemoryError:
+                            too_big = True
 
-                        non_growing_iter += 1
+                        if not too_big:
+                            W, Y, G, E_q = train_for_batch_batch(X_presented, pdists, i, self.max_its, lrst, lrdec, im_neix, W,
+                                                              self.max_epochs_per_sample, G, epsilon, self.min_strength,
+                                                              shp, Y,
+                                                              self.ns_rate, alpha, beta, self.rng_state, E_q)
+                        else:
+                            chunks = X_presented.shape[0] // 100000
+
+                            for chunk in range(chunks + 1):
+                                chunk_st = chunk * 100000
+                                chunk_en = chunk_st + 100000
+                                X_chunk = X_presented[chunk_st:chunk_en]
+                                pdists = cdist(X_chunk, W, 'sqeuclidean').astype(np.float32)
+                                W, Y, G, E_q = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, lrdec, im_neix, W,
+                                                                     self.max_epochs_per_sample, G, epsilon, self.min_strength,
+                                                                     shp, Y,
+                                                                     self.ns_rate, alpha, beta, self.rng_state, E_q)
+                drifters = shp[(G > 0).sum(axis=0) < im_neix]
+            else:
+                embed_length = len(X_presented)
+                G[G < self.min_strength] = 0
+                if verbose:
+                    print(
+                        '\rTraining iteration %i without self organization :  Map size : %i, SOED : %i , Batch Size : %i' % (
+                            i + 1, G.shape[0], soed, embed_length), end='')
+                repeats = 1 if not soed == self.ss else 1
+                for repeat in range(repeats):
+                    Y = embed_batch_epochs(Y, G, self.max_its, i, alpha, beta, self.rng_state)
+                non_growing_iter += 1
 
         self.lrst = self.lrst * self.agility
         self.W = W
         self.Y = Y
         self.G = G
-        self.E_q = E_q *0
+        self.E_q = E_q * 0
         self.so_lr_st = so_lr_st
+        if verbose:
+            print('\n Done ...')
         return self
 
     def fit_transform(self, X):
