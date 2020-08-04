@@ -1,11 +1,11 @@
 import numpy as np
 from sklearn.metrics.pairwise import pairwise_distances_argmin
-from scipy.spatial.distance import  cdist
+# from scipy.spatial.distance import  cdist
 from sklearn.manifold import SpectralEmbedding
 from sklearn.base import BaseEstimator
 from util import find_spread_tightness, \
     train_for_input, train_for_batch_online, bulk_grow_with_drifters, bulk_grow_sans_drifters, embed_batch_epochs, \
-    interleaved_growth, train_for_batch_batch
+    interleaved_growth, train_for_batch_batch, sq_eucl_opt
 
 INT32_MIN = np.iinfo(np.int32).min + 1
 INT32_MAX = np.iinfo(np.int32).max - 1
@@ -89,8 +89,8 @@ class SONG(BaseEstimator):
         verbose = self.verbose
         min_dist = self.min_dist
         spread = self.spread
-        self.ss = 12  # 0 if X.shape[0] < 10000 else 12
-        min_batch = 400  # if X.shape[0] > 10000 else X.shape[0]
+        self.ss = 15
+        min_batch = 1000
         self.max_its = self.ss * 2
         if self.alpha == None and self.beta == None:
             alpha, beta = find_spread_tightness(spread, min_dist)
@@ -116,13 +116,15 @@ class SONG(BaseEstimator):
 
         X = X.astype(np.float32)
         self.max_epochs_per_sample = np.float32(1)
-
+        reuse = False
         try:
             ''' When reusing a trained model, this block will be executed.'''
             W = self.W
             G = self.G
             Y = self.Y
             E_q = self.E_q
+
+            reuse = True
             if verbose:
                 print('Using Trained Map')
         except:
@@ -147,19 +149,18 @@ class SONG(BaseEstimator):
         lrst = self.lrst
 
         presented_len = X.shape[0]
-        order = self.random_state.permutation(X.shape[0])
         soed = 0
         lrdec = 1.
         soeds = np.arange(self.ss)
         sratios = ((soeds) * 1. / (self.ss - 1))
         batch_sizes = (X.shape[0] - min_batch) * sratios ** 2 + min_batch
         epsilon = self.epsilon
-
+        lr_sigma = np.float32(np.log10(X.shape[0]) / 2.)
         non_growing_iter = 0
         drifters = []
         for i in range(self.max_its):
             order = self.random_state.permutation(X.shape[0])
-            self.min_strength = epsilon ** ((self.dim + self.max_age) * ( i > self.max_its//2) )
+            self.min_strength = epsilon ** ((self.dim + self.max_age) * ( i > self.max_its//2 or not reuse) )
             so_iter = 0 if self.ss <= self.max_its else 1
             if not i % 2:
                 presented_len = int(batch_sizes[soed])
@@ -191,7 +192,7 @@ class SONG(BaseEstimator):
                                                                                      self.max_epochs_per_sample,
                                                                                      G, epsilon, self.min_strength, shp,
                                                                                      Y, self.ns_rate, alpha, beta,
-                                                                                     self.rng_state, E_q)
+                                                                                     self.rng_state, E_q, lr_sigma)
 
                         if (growing_iter or X_presented.shape[0] < 2500) and G.shape[0] < max_nodes and soed < self.ss:
                             W, Y, G, E_q, shp = interleaved_growth(b, W, Y, G, E_q, presented_len, thresh_g, neilist,
@@ -208,14 +209,14 @@ class SONG(BaseEstimator):
                         print(
                             '\r Training with Self Organization for all presented inputs in this batch i = {} , |X| = {} , |G| = {}  '.format(
                                 i + 1, presented_len, G.shape[0]), end='')
-                    if i * 1./self.max_its <= 0.8 or X.shape[0] < 10000:
+                    if (i * 1./self.max_its <= 0.8 or X.shape[0] < 10000) and presented_len < 100000:
                         W, Y, G, E_q = train_for_batch_online(X_presented, i, self.max_its, lrst, lrdec, im_neix, W,
                                                           self.max_epochs_per_sample, G, epsilon, self.min_strength, shp, Y,
-                                                          self.ns_rate, alpha, beta, self.rng_state, E_q)
+                                                          self.ns_rate, alpha, beta, self.rng_state, E_q, lr_sigma)
                     else:
                         too_big = False
                         try:
-                            pdists = cdist(X_presented, W, 'sqeuclidean').astype(np.float32)
+                            pdists = sq_eucl_opt(X_presented, W).astype(np.float32)
                         except MemoryError:
                             too_big = True
 
@@ -223,19 +224,19 @@ class SONG(BaseEstimator):
                             W, Y, G, E_q = train_for_batch_batch(X_presented, pdists, i, self.max_its, lrst, lrdec, im_neix, W,
                                                               self.max_epochs_per_sample, G, epsilon, self.min_strength,
                                                               shp, Y,
-                                                              self.ns_rate, alpha, beta, self.rng_state, E_q)
+                                                              self.ns_rate, alpha, beta, self.rng_state, E_q, lr_sigma)
                         else:
-                            chunks = X_presented.shape[0] // 100000
+                            chunks = X_presented.shape[0] // 5000
 
                             for chunk in range(chunks + 1):
-                                chunk_st = chunk * 100000
-                                chunk_en = chunk_st + 100000
+                                chunk_st = chunk * 5000
+                                chunk_en = chunk_st + 5000
                                 X_chunk = X_presented[chunk_st:chunk_en]
-                                pdists = cdist(X_chunk, W, 'sqeuclidean').astype(np.float32)
+                                pdists = sq_eucl_opt(X_chunk, W).astype(np.float32)
                                 W, Y, G, E_q = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, lrdec, im_neix, W,
                                                                      self.max_epochs_per_sample, G, epsilon, self.min_strength,
                                                                      shp, Y,
-                                                                     self.ns_rate, alpha, beta, self.rng_state, E_q)
+                                                                     self.ns_rate, alpha, beta, self.rng_state, E_q, lr_sigma)
                 drifters = shp[(G > 0).sum(axis=0) < im_neix]
             else:
                 embed_length = len(X_presented)
@@ -246,7 +247,7 @@ class SONG(BaseEstimator):
                             i + 1, G.shape[0], soed, embed_length), end='')
                 repeats = 1 if not soed == self.ss else 1
                 for repeat in range(repeats):
-                    Y = embed_batch_epochs(Y, G, self.max_its, i, alpha, beta, self.rng_state)
+                    Y = embed_batch_epochs(Y, G, self.max_its, i, alpha, beta, self.rng_state, self.agility)
                 non_growing_iter += 1
 
         self.lrst = self.lrst * self.agility

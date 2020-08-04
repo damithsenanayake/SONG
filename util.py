@@ -28,9 +28,63 @@ def tau_rand_int(state):
 
     return state[0] ^ state[1] ^ state[2]
 
+@numba.njit('f4[:,:](f4[:,:], f4[:,:])', fastmath=True, parallel=True)
+def sq_eucl_opt(A, B):
+    ''' function adapted from https://github.com/numba/numba-scipy/issues/38#issuecomment-623569703'''
+    C = np.empty((A.shape[0], B.shape[0]), np.float32)
+    I_BLK = 32
+    J_BLK = 32
+
+    init_val_arr = np.zeros(1, A.dtype)
+    init_val = init_val_arr[0]
+
+    for ii in numba.prange(A.shape[0] // I_BLK):
+        for jj in range(B.shape[0] // J_BLK):
+            for i in range(I_BLK // 4):
+                for j in range(J_BLK // 2):
+                    acc_0 = init_val
+                    acc_1 = init_val
+                    acc_2 = init_val
+                    acc_3 = init_val
+                    acc_4 = init_val
+                    acc_5 = init_val
+                    acc_6 = init_val
+                    acc_7 = init_val
+                    for k in range(A.shape[1]):
+                        acc_0 += (A[ii * I_BLK + i * 4 + 0, k] - B[jj * J_BLK + j * 2 + 0, k]) ** 2
+                        acc_1 += (A[ii * I_BLK + i * 4 + 0, k] - B[jj * J_BLK + j * 2 + 1, k]) ** 2
+                        acc_2 += (A[ii * I_BLK + i * 4 + 1, k] - B[jj * J_BLK + j * 2 + 0, k]) ** 2
+                        acc_3 += (A[ii * I_BLK + i * 4 + 1, k] - B[jj * J_BLK + j * 2 + 1, k]) ** 2
+                        acc_4 += (A[ii * I_BLK + i * 4 + 2, k] - B[jj * J_BLK + j * 2 + 0, k]) ** 2
+                        acc_5 += (A[ii * I_BLK + i * 4 + 2, k] - B[jj * J_BLK + j * 2 + 1, k]) ** 2
+                        acc_6 += (A[ii * I_BLK + i * 4 + 3, k] - B[jj * J_BLK + j * 2 + 0, k]) ** 2
+                        acc_7 += (A[ii * I_BLK + i * 4 + 3, k] - B[jj * J_BLK + j * 2 + 1, k]) ** 2
+                    C[ii * I_BLK + i * 4 + 0, jj * J_BLK + j * 2 + 0] = (acc_0)
+                    C[ii * I_BLK + i * 4 + 0, jj * J_BLK + j * 2 + 1] =(acc_1)
+                    C[ii * I_BLK + i * 4 + 1, jj * J_BLK + j * 2 + 0] =(acc_2)
+                    C[ii * I_BLK + i * 4 + 1, jj * J_BLK + j * 2 + 1] = (acc_3)
+                    C[ii * I_BLK + i * 4 + 2, jj * J_BLK + j * 2 + 0] =(acc_4)
+                    C[ii * I_BLK + i * 4 + 2, jj * J_BLK + j * 2 + 1] = (acc_5)
+                    C[ii * I_BLK + i * 4 + 3, jj * J_BLK + j * 2 + 0] = (acc_6)
+                    C[ii * I_BLK + i * 4 + 3, jj * J_BLK + j * 2 + 1] = (acc_7)
+        for i in range(I_BLK):
+            for j in range((B.shape[0] // J_BLK) * J_BLK, B.shape[0]):
+                acc_0 = init_val
+                for k in range(A.shape[1]):
+                    acc_0 += (A[ii * I_BLK + i, k] - B[j, k]) ** 2
+                C[ii * I_BLK + i, j] = (acc_0)
+
+    for i in range((A.shape[0] // I_BLK) * I_BLK, A.shape[0]):
+        for j in range(B.shape[0]):
+            acc_0 = init_val
+            for k in range(A.shape[1]):
+                acc_0 += (A[i, k] - B[j, k]) ** 2
+            C[i, j] = (acc_0)
+
+    return C
 
 @numba.njit("Tuple((f4[:], i4[:]))(f4[:],f4[:,:], i8)", fastmath=True)
-def pairwise_and_neighbors(x, W, n_neis):
+def distances_and_neighbors(x, W, n_neis):
     dists_2 = np.ones(W.shape[0], dtype=np.float32) * np.float32(np.inf)
     neinds = [np.int32(1) for _ in range(n_neis)]#np.ones(n_neis, dtype=np.int32)
     n_W = np.int32(W.shape[0])
@@ -282,27 +336,25 @@ def bulk_grow_with_gen(shp, E_q, thresh_g, drifters, G, W, Y, X_presented, birth
 
     return W, G, Y, E_q, birth_gen, last_gen, drifters
 
-@numba.njit('f4(f4)', fastmath=True)
-def get_so_rate(tau):
-    return  np.exp(-3 * tau)
+@numba.njit('f4(f4, f4)', fastmath=True)
+def get_so_rate(tau, sigma):
+    return  np.exp(-sigma * tau)
 
 @numba.njit(fastmath=True, )
 def train_for_batch_online(X_presented, i, max_its, lrst, lrdec, im_neix, W, max_epochs_per_sample, G, epsilon, min_strength,
-                           shp, Y, ns_rate, alpha, beta, rng_state, E_q):
+                           shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma):
 
     dampen = 1
-
     if W.shape[0] <= pow(im_neix, 2):
         dampen = (W.shape[0] * 1./X_presented.shape[0])
-
     for k in range(len(X_presented)):
         x = X_presented[k]
         tau = np.float32((i * X_presented.shape[0] + k) * 1. / (max_its * X_presented.shape[0]))
         lr = np.float32((pow((1 - tau) , lrdec))) * dampen
-        so_lr = lrst*get_so_rate(i * 1./max_its)
+        so_lr = lrst*get_so_rate(i * 1./max_its, lr_sigma)
 
         nei_len = np.int32(min(im_neix, W.shape[0]))
-        dist_H, neilist = pairwise_and_neighbors(x, W, nei_len)
+        dist_H, neilist = distances_and_neighbors(x, W, nei_len)
 
         b = neilist[0]
         G[b] *= epsilon
@@ -354,7 +406,7 @@ def get_closest(dists_2, k):
 
 @numba.njit(fastmath=True, )
 def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im_neix, W, max_epochs_per_sample, G, epsilon, min_strength,
-                           shp, Y, ns_rate, alpha, beta, rng_state, E_q):
+                           shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma):
     dampen = 1
 
     if W.shape[0] <= pow(im_neix, 2) or (W.shape[0] * 1. / X_presented.shape[0]) < 0.001:
@@ -364,7 +416,7 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
         x = X_presented[k]
         tau = np.float32((i * X_presented.shape[0] + k) * 1. / (max_its * X_presented.shape[0]))
         lr = np.float32((pow((1 - tau) , lrdec))) * dampen
-        so_lr = lrst*get_so_rate(i * 1./max_its)
+        so_lr = lrst*get_so_rate(i * 1./max_its, lr_sigma)
 
         nei_len = np.int32(min(im_neix, W.shape[0]))
         dist_H = pdist_matrix[k]
@@ -397,17 +449,17 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
 
 @numba.njit(fastmath=True, )
 def train_for_input(x, X_presented, i, k, max_its, lrst, lrdec, im_neix, W, max_epochs_per_sample, G, epsilon,
-                    min_strength, shp, Y, ns_rate, alpha, beta, rng_state, E_q):
+                    min_strength, shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma):
     dampen = 1
     if W.shape[0] <= pow(im_neix , 2):
         dampen = (W.shape[0] * 1. / X_presented.shape[0])
 
     tau = np.float32((i * X_presented.shape[0] + k) * 1. / (max_its * X_presented.shape[0]))
     lr = np.float32((pow((1 - tau) , lrdec))) * dampen
-    so_lr = lrst*get_so_rate(tau)
+    so_lr = lrst*get_so_rate(tau, lr_sigma)
     nei_len = np.int64(min(im_neix, W.shape[0]))
 
-    dist_H, neilist = pairwise_and_neighbors(x, W, nei_len)
+    dist_H, neilist = distances_and_neighbors(x, W, nei_len)
     if not nei_len == len(np.unique(neilist)):
         raise Exception('non_unique_elements')
     b = neilist[0]
@@ -528,8 +580,8 @@ def interleaved_growth(b, W, Y, G, E_q, presented_len, thresh_g, neilist, shp):
     return W, Y, G, E_q, shp
 
 
-@numba.njit('f4[:,:]( f4[:,:], f4[:, :], i4, i4, f4, f4, i8[:] )', fastmath=True, )
-def embed_batch_epochs(Y, G, max_its, i_st, alpha, beta, rng_state):
+@numba.njit('f4[:,:]( f4[:,:], f4[:, :], i4, i4, f4, f4, i8[:], f4 )', fastmath=True, )
+def embed_batch_epochs(Y, G, max_its, i_st, alpha, beta, rng_state, agility):
     shp = np.arange(G.shape[0]).astype(np.int32)
     P_matrix = (G + G.T) / 2.
     tau = (i_st) * 1. / (max_its)
@@ -546,7 +598,7 @@ def embed_batch_epochs(Y, G, max_its, i_st, alpha, beta, rng_state):
     n_edges = len(pos_edges[0])
     for p in range(n_edges):
         j = pos_edges[0][p]
-        lr = (starting_lr + (ending_lr - starting_lr) * (updated * 1. / totits))
+        lr = (starting_lr + (ending_lr - starting_lr) * (updated * 1. / totits)) * agility
         neighbors = shp[G[j] + G[:, j] > 0]
         for k in range(neighbors.shape[0]):
             epochs = epochs_per_sample[j][neighbors[k]]
