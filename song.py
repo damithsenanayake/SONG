@@ -160,7 +160,7 @@ class SONG(BaseEstimator):
         drifters = []
         for i in range(self.max_its):
             order = self.random_state.permutation(X.shape[0])
-            self.min_strength = epsilon ** ((self.dim + self.max_age) * ( i > self.max_its//2 or not reuse) )
+            self.min_strength = epsilon ** ((self.dim + self.max_age))
             so_iter = 0 if self.ss <= self.max_its else 1
             if not i % 2:
                 presented_len = int(batch_sizes[soed])
@@ -247,7 +247,7 @@ class SONG(BaseEstimator):
                             i + 1, G.shape[0], soed, embed_length), end='')
                 repeats = 1 if not soed == self.ss else 1
                 for repeat in range(repeats):
-                    Y = embed_batch_epochs(Y, G, self.max_its, i, alpha, beta, self.rng_state, self.agility)
+                    Y = embed_batch_epochs(Y, G, self.max_its, i, alpha, beta, self.rng_state, self.agility if reuse else 1.)
                 non_growing_iter += 1
 
         self.lrst = self.lrst * self.agility
