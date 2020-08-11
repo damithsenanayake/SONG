@@ -30,7 +30,7 @@ def tau_rand_int(state):
 
 @numba.njit('f4[:,:](f4[:,:], f4[:,:])', fastmath=True, parallel=True)
 def sq_eucl_opt(A, B):
-    ''' function adapted from https://github.com/numba/numba-scipy/issues/38#issuecomment-623569703'''
+    ''' function adapted from https://github.com/numba/numba-scipy/issues/38#issuecomment-623569703 '''
     C = np.empty((A.shape[0], B.shape[0]), np.float32)
     I_BLK = 32
     J_BLK = 32
@@ -83,7 +83,7 @@ def sq_eucl_opt(A, B):
 
     return C
 
-@numba.njit("Tuple((f4[:], i4[:]))(f4[:],f4[:,:], i8)", fastmath=True)
+@numba.njit("Tuple((f4[:], i4[:]))(f4[:],f4[:,:], i8)", fastmath=True, parallel=True)
 def distances_and_neighbors(x, W, n_neis):
     dists_2 = np.ones(W.shape[0], dtype=np.float32) * np.float32(np.inf)
     neinds = [np.int32(1) for _ in range(n_neis)]#np.ones(n_neis, dtype=np.int32)
@@ -148,7 +148,7 @@ def rdist(x, y):
     return dist
 
 
-@numba.njit()
+@numba.njit(fastmath = True)
 def bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y, X_presented):
     growth_size = max(0, len(shp[E_q >= thresh_g]) - len(drifters))
 
@@ -171,8 +171,9 @@ def bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y, X_presented):
         E_q[:-growth_size] = oldE
 
         grown = 0
+        growing_nodes = shp[oldE >= thresh_g]
+
         shp = np.arange(G.shape[0]).astype(np.int32)
-        growing_nodes = shp[E_q >= thresh_g]
 
         if len(growing_nodes) > 1:
             for k in range(len(growing_nodes)):
@@ -182,8 +183,9 @@ def bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y, X_presented):
                 if len(closests) == 0:
                     drifters = np.append(drifters, b)
                     continue
-                W_n = W[closests].sum(axis=0) / len(closests)
-                Y_n = Y[closests].sum(axis=0) / len(closests)
+                bias = 1e-5
+                W_n = (1-bias) * W[b] + bias * (W[closests].sum(axis=0) / len(closests))
+                Y_n = (1-bias) * Y[b] + bias * (Y[closests].sum(axis=0) / len(closests))
                 if grown >= len(drifters):
                     W[old_size + grown - len(drifters)] = W_n
 
@@ -212,7 +214,7 @@ def bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y, X_presented):
     return W, G, Y, E_q, drifters
 
 
-@numba.njit()
+@numba.njit(fastmath = True)
 def bulk_grow_sans_drifters(shp, E_q, thresh_g, G, W, Y, X_presented):
     growth_size = max(0, len(shp[E_q >= thresh_g]))
 
@@ -233,108 +235,38 @@ def bulk_grow_sans_drifters(shp, E_q, thresh_g, G, W, Y, X_presented):
 
         E_q = np.zeros(E_q.shape[0] + growth_size, dtype=np.float32)
         E_q[:-growth_size] = oldE
+        growing_nodes = shp[oldE >= thresh_g]
 
-        grown = 0
         shp = np.arange(G.shape[0]).astype(np.int32)
-        growing_nodes = shp[E_q >= thresh_g]
 
         if len(growing_nodes) > 1:
             for k in range(len(growing_nodes)):
-                b = growing_nodes[k]
-                ''' If no reusable nodes create new nodes'''
-                closests = shp[G[b] == 1]
-                W_n = W[closests].sum(axis=0) / len(closests)
-                Y_n = Y[closests].sum(axis=0) / len(closests)
-                W[old_size + grown ] = W_n
-
-                Y[old_size + grown ] = Y_n
-                ''' connect neighbors to the new node '''
-                G[old_size + grown ][b] = 1
-                G[b][old_size + grown ] = 0
-                G[old_size + grown ][closests] = 1
-                G[closests][:, old_size + grown ] = 0
-
-                ''' Append new error. '''
-                E_q[old_size + grown ] = 0
-
-                G[b][closests] = 0
-                G[closests][:, b] = 0
-                E_q[closests] = 0.5
-                grown += 1
-
-    return W, G, Y, E_q
-
-@numba.njit(fastmath=True)
-def bulk_grow_with_gen(shp, E_q, thresh_g, drifters, G, W, Y, X_presented, birth_gen, last_gen):
-    growth_size = max(0, len(shp[E_q >= thresh_g]) - len(drifters))
-
-    if growth_size and G.shape[0] < 10000 and G.shape[0] < X_presented.shape[0]:
-        oldG = G
-        oldW = W
-        oldY = Y
-        oldE = E_q
-        old_birth_gen = birth_gen
-        old_size = oldW.shape[0]
-        W = np.zeros((W.shape[0] + growth_size, W.shape[1]), dtype=np.float32)
-        W[:-growth_size] = oldW
-
-        Y = np.zeros((Y.shape[0] + growth_size, Y.shape[1]), dtype=np.float32)
-        Y[: -growth_size] = oldY
-
-        G = np.zeros((G.shape[0] + growth_size, G.shape[1] + growth_size), dtype=np.float32)
-        G[:-growth_size][:, :-growth_size] = oldG
-
-        E_q = np.zeros(E_q.shape[0] + growth_size, dtype=np.float32)
-        E_q[:-growth_size] = oldE
-        birth_gen = np.zeros(birth_gen.shape[0] + growth_size)
-        birth_gen[:-growth_size] = old_birth_gen
-        birth_gen[-growth_size:] = last_gen
-        grown = 0
-        shp = np.arange(G.shape[0]).astype(np.int32)
-        growing_nodes = shp[E_q >= thresh_g]
-
-        if len(growing_nodes) > 1:
-            for k in range(len(growing_nodes)):
-
                 b = growing_nodes[k]
                 ''' If no reusable nodes create new nodes'''
                 closests = shp[G[b] == 1]
                 if len(closests) == 0:
-                    drifters = np.append(drifters, b)
                     continue
-                W_n = W[closests].sum(axis=0) / len(closests)
-                Y_n = Y[closests].sum(axis=0) / len(closests)
-                if grown >= len(drifters):
-                    W[old_size + grown - len(drifters)] = W_n
+                bias = 1e-5
+                W_n = (1 - bias) * W[b] + bias * (W[closests].sum(axis=0) / len(closests))
+                Y_n = (1 - bias) * Y[b] + bias * (Y[closests].sum(axis=0) / len(closests))
+                W[old_size + k ] = W_n
 
-                    Y[old_size + grown - len(drifters)] = Y_n
-                    ''' connect neighbors to the new node '''
-                    G[old_size + grown - len(drifters)][b] = 1
-                    G[b][old_size + grown - len(drifters)] = 0
-                    G[old_size + grown - len(drifters)][closests] = 1
-                    G[closests][:, old_size + grown - len(drifters)] = 0
+                Y[old_size + k] = Y_n
+                ''' connect neighbors to the new node '''
+                G[old_size + k ][b] = 1
+                G[b][old_size + k ] = 0
+                G[old_size + k ][closests] = 1
+                G[closests][:, old_size + k ] = 0
 
-                    ''' Append new error. '''
-                    E_q[old_size + grown - len(drifters)] = 0
-                    birth_gen[old_size + grown - len(drifters)] = last_gen
-                else:
-                    '''replace unusable nodes with new nodes'''
-                    W[drifters[grown]] = W_n
-                    Y[drifters[grown]] = Y_n
-                    G[drifters[grown]][b] = 1
-                    G[b][drifters[grown]] = 0
-                    G[drifters[grown]][closests] = 1
-                    G[closests][:, drifters[grown]] = 0
-                    birth_gen[drifters[grown]] = last_gen
+                ''' Append new error. '''
+                E_q[old_size + k -1] = 0
 
                 G[b][closests] = 0
                 G[closests][:, b] = 0
                 E_q[closests] = 0.5
-                last_gen += 1
 
-                grown += 1
+    return W, G, Y, E_q
 
-    return W, G, Y, E_q, birth_gen, last_gen, drifters
 
 @numba.njit('f4(f4, f4)', fastmath=True)
 def get_so_rate(tau, sigma):
@@ -342,15 +274,16 @@ def get_so_rate(tau, sigma):
 
 @numba.njit(fastmath=True, )
 def train_for_batch_online(X_presented, i, max_its, lrst, lrdec, im_neix, W, max_epochs_per_sample, G, epsilon, min_strength,
-                           shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma):
+                           shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr):
 
     dampen = 1
+    nei_sig = 1.
     if W.shape[0] <= pow(im_neix, 2):
         dampen = (W.shape[0] * 1./X_presented.shape[0])
     for k in range(len(X_presented)):
         x = X_presented[k]
         tau = np.float32((i * X_presented.shape[0] + k) * 1. / (max_its * X_presented.shape[0]))
-        lr = np.float32((pow((1 - tau) , lrdec))) * dampen
+        lr = np.float32((pow((1 - tau) , lrdec))) * dampen * reduced_lr
         so_lr = lrst*get_so_rate(i * 1./max_its, lr_sigma)
 
         nei_len = np.int32(min(im_neix, W.shape[0]))
@@ -367,6 +300,9 @@ def train_for_batch_online(X_presented, i, max_its, lrst, lrdec, im_neix, W, max
 
         denom = dist_H[neilist[-1]]
 
+        if denom == 0 :
+            denom = np.float32(1.)
+
         epoch_vector = max_epochs_per_sample * ((G[b] + G[:, b]) / 2. + 1)
         neg_epoch_vector = ns_rate* (1 - (G[b] + G[:, b]) / 2.)
 
@@ -375,7 +311,7 @@ def train_for_batch_online(X_presented, i, max_its, lrst, lrdec, im_neix, W, max
                                              dist_H[neighbors] / denom,
                                              Y, ns_rate, alpha, beta,
                                              lr, rng_state, epoch_vector.astype(np.int32),
-                                             neg_epoch_vector.astype(np.int32))
+                                             neg_epoch_vector.astype(np.int32), nei_sig)
         E_q[b] += dist_H[0]
 
     return W, Y, G, E_q
@@ -406,16 +342,16 @@ def get_closest(dists_2, k):
 
 @numba.njit(fastmath=True, )
 def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im_neix, W, max_epochs_per_sample, G, epsilon, min_strength,
-                           shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma):
+                           shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr):
     dampen = 1
-
+    nei_sig = 1.
     if W.shape[0] <= pow(im_neix, 2) or (W.shape[0] * 1. / X_presented.shape[0]) < 0.001:
         dampen = 0.001
 
     for k in range(len(X_presented)):
         x = X_presented[k]
         tau = np.float32((i * X_presented.shape[0] + k) * 1. / (max_its * X_presented.shape[0]))
-        lr = np.float32((pow((1 - tau) , lrdec))) * dampen
+        lr = np.float32((pow((1 - tau) , lrdec))) * dampen * reduced_lr
         so_lr = lrst*get_so_rate(i * 1./max_its, lr_sigma)
 
         nei_len = np.int32(min(im_neix, W.shape[0]))
@@ -432,6 +368,8 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
         neighbors = shp[nei_bin]
 
         denom = dist_H[neilist[-1]]
+        if denom == 0 :
+            denom = np.float32(1.)
 
         epoch_vector = max_epochs_per_sample * ((G[b] + G[:, b]) / 2. + 1)
         neg_epoch_vector = ns_rate* (1 - (G[b] + G[:, b]) / 2.)
@@ -441,7 +379,7 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
                                              dist_H[neighbors] / denom,
                                              Y, ns_rate, alpha, beta,
                                              lr, rng_state, epoch_vector.astype(np.int32),
-                                             neg_epoch_vector.astype(np.int32))
+                                             neg_epoch_vector.astype(np.int32), nei_sig)
         E_q[b] += dist_H[0]
 
     return W, Y, G, E_q
@@ -449,13 +387,15 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
 
 @numba.njit(fastmath=True, )
 def train_for_input(x, X_presented, i, k, max_its, lrst, lrdec, im_neix, W, max_epochs_per_sample, G, epsilon,
-                    min_strength, shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma):
+                    min_strength, shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr):
     dampen = 1
+    nei_sig = 1.
+
     if W.shape[0] <= pow(im_neix , 2):
         dampen = (W.shape[0] * 1. / X_presented.shape[0])
 
     tau = np.float32((i * X_presented.shape[0] + k) * 1. / (max_its * X_presented.shape[0]))
-    lr = np.float32((pow((1 - tau) , lrdec))) * dampen
+    lr = np.float32((pow((1 - tau) , lrdec))) * dampen * reduced_lr
     so_lr = lrst*get_so_rate(tau, lr_sigma)
     nei_len = np.int64(min(im_neix, W.shape[0]))
 
@@ -475,6 +415,8 @@ def train_for_input(x, X_presented, i, k, max_its, lrst, lrdec, im_neix, W, max_
     neighbors = shp[(G[b] + G[:, b]) > 0]
 
     denom = dist_H[neilist[-1]]
+    if denom == 0:
+        denom = np.float32(1.)
 
     dist_H[neilist[0]] = 0
 
@@ -487,21 +429,21 @@ def train_for_input(x, X_presented, i, k, max_its, lrst, lrdec, im_neix, W, max_
                                          dist_H[neighbors] / denom,
                                          Y, ns_rate, alpha, beta,
                                          lr, rng_state, epoch_vector.astype(np.int32),
-                                         neg_epoch_vector.astype(np.int32))
+                                         neg_epoch_vector.astype(np.int32), nei_sig)
     E_q[b] += dist_H[0]
 
     return W, Y, G, E_q, k, b, neilist, neighbors, lr
 
 
 @numba.njit(
-    'UniTuple(f4[:, :], 2)(f4[:], f4,  i4, i4[:],  f4[:,:], f4[:], f4[:,:], i4, f4, f4, f4, i8[:], i4[:], i4[:])',
+    'UniTuple(f4[:, :], 2)(f4[:], f4,  i4, i4[:],  f4[:,:], f4[:], f4[:,:], i4, f4, f4, f4, i8[:], i4[:], i4[:], f4)',
     fastmath=True, )
 def train_neighborhood(x, so_lr, b, neighbors, W, hdist_nei, Y, ns_rate, alpha, beta, lr, rng_state, epoch_vector,
-                       neg_epoch_vector):
+                       neg_epoch_vector, sigma):
     hdists = hdist_nei
     y_b = Y[b]
     ''' Self Organizing '''
-    sigma = 1.
+    sigma = np.float32(np.log10(Y.shape[0])/2)
     for j in range(W.shape[0]):
         hdist = hdists[j]
         if neighbors[j] == b:
@@ -552,8 +494,9 @@ def interleaved_growth(b, W, Y, G, E_q, presented_len, thresh_g, neilist, shp):
         oldY = Y
         oldE = E_q
         closests = neilist
-        W_n = W[closests].sum(axis=0) / len(closests)
-        Y_n = Y[closests].sum(axis=0) / len(closests)
+        bias = 1e-5
+        W_n = (1 - bias) * W[b] + bias * (W[closests].sum(axis=0) / len(closests))
+        Y_n = (1 - bias) * Y[b] + bias * (Y[closests].sum(axis=0) / len(closests))
         W = np.zeros((W.shape[0] + growth_size, W.shape[1]), dtype=np.float32)
         W[:-growth_size] = oldW
         W[-growth_size:] = W_n
