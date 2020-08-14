@@ -468,10 +468,12 @@ def train_neighborhood(x, so_lr, b, neighbors, W, hdist_nei, Y, ns_rate, alpha, 
                     if ldist_sq > 0.:
                         y_b[i] += positive_clip(push_grad / (ldist_sq + 0.001) * (y_b[i] - Y[n][i]),
                                                 4) * lr
+                        Y[n][i] -= positive_clip(push_grad / (ldist_sq + 0.001) * (y_b[i] - Y[n][i]),
+                                                4) * lr
                     elif b == n:
                         continue
                     else:
-                        y_b[i] += lr
+                        y_b[i] += lr * 4
             Y_j = Y[neighbors[j]]
             ldist_sq = rdist(y_b, Y_j)
             '''deltas of the embedding are multiplied by a regularization term equal to the euclidean distance'''
@@ -560,10 +562,11 @@ def embed_batch_epochs(Y, G, max_its, i_st, alpha, beta, rng_state, agility):
                         for i in range(Y[j].shape[0]):
                             if ldist_sq > 0.:
                                 Y[j][i] += positive_clip(push_grad / (ldist_sq + 0.001) * (Y[j][i] - Y[n][i]), 4) * lr
+                                Y[n][i] -= positive_clip(push_grad / (ldist_sq + 0.001) * (Y[j][i] - Y[n][i]), 4) * lr
                             elif j == n:
                                 continue
                             else:
-                                Y[j][i] += lr
+                                Y[j][i] += lr * 4
                 ldist_sq = rdist(Y[j], Y[neighbors[k]])
 
                 pull_grad = (2 * alpha * beta * pow(ldist_sq, beta - 1))

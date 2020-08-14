@@ -4,8 +4,8 @@ from sklearn.metrics.pairwise import pairwise_distances_argmin
 from sklearn.manifold import SpectralEmbedding
 from sklearn.base import BaseEstimator
 from util import find_spread_tightness, \
-    train_for_input, train_for_batch_online, bulk_grow_with_drifters, bulk_grow_sans_drifters, embed_batch_epochs, \
-    interleaved_growth, train_for_batch_batch, sq_eucl_opt
+    train_for_input, train_for_batch_online, bulk_grow_sans_drifters, embed_batch_epochs, \
+    train_for_batch_batch, sq_eucl_opt
 
 INT32_MIN = np.iinfo(np.int32).min + 1
 INT32_MAX = np.iinfo(np.int32).max - 1
@@ -15,7 +15,7 @@ class SONG(BaseEstimator):
 
     def __init__(self, out_dim=2, n_neighbors=3,
                  lr=1., spread_factor=0.9,
-                 spread=1., min_dist=0.1, ns_rate=8,
+                 spread=1., min_dist=0.1, ns_rate=5,
                  gamma=None,
                  init=None,
                  agility=0.8, verbose=0,
@@ -93,7 +93,7 @@ class SONG(BaseEstimator):
         verbose = self.verbose
         min_dist = self.min_dist
         spread = self.spread
-        self.ss = 35
+        self.ss = 25
         min_batch = 10
         self.max_its = self.ss * 2
         if self.alpha == None and self.beta == None:
@@ -106,7 +106,7 @@ class SONG(BaseEstimator):
             print("alpha : {} beta : {}".format(alpha, beta))
         if self.sf == None:
             self.sf = np.log(4) / (2 * self.ss)
-        thresh_g = -X.shape[1] * np.log(self.sf) * (scale)
+        thresh_g = -np.log(X.shape[1]) * np.log(self.sf) * (scale)
 
         so_lr_st = self.lrst
         print('prototypes {}'.format(self.prototypes))
@@ -159,7 +159,7 @@ class SONG(BaseEstimator):
         lrdec = 1.
         soeds = np.arange(self.ss)
         sratios = ((soeds) * 1. / (self.ss - 1))
-        batch_sizes = (X.shape[0] - min_batch) * sratios ** 8 + min_batch
+        batch_sizes = (X.shape[0] - min_batch) * sratios ** np.log10(X.shape[0]+100) + min_batch
         epsilon = self.epsilon
         lr_sigma = np.float32(np.log10(X.shape[0]) / 2.)
         non_growing_iter = 0
@@ -223,7 +223,7 @@ class SONG(BaseEstimator):
                                                               self.ns_rate, alpha, beta, self.rng_state, E_q, lr_sigma, self.reduced_lr)
 
                         else:
-                            chunk_size = 2000
+                            chunk_size = 1000
                             chunks = X_presented.shape[0] // chunk_size
 
                             for chunk in range(chunks + 1):
