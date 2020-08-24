@@ -278,8 +278,8 @@ def train_for_batch_online(X_presented, i, max_its, lrst, lrdec, im_neix, W, max
 
     dampen = 1
     nei_sig = 1.
-    if W.shape[0] <= pow(im_neix, 2):
-        dampen = (W.shape[0] * 1./X_presented.shape[0])
+    # if W.shape[0] <= pow(im_neix, 2):
+    #     dampen = (W.shape[0] * 1./X_presented.shape[0])
     for k in range(len(X_presented)):
         x = X_presented[k]
         tau = np.float32((i * X_presented.shape[0] + k) * 1. / (max_its * X_presented.shape[0]))
@@ -345,8 +345,8 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
                            shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr):
     dampen = 1
     nei_sig = 1.
-    if W.shape[0] <= pow(im_neix, 2) or (W.shape[0] * 1. / X_presented.shape[0]) < 0.001:
-        dampen = 0.001
+    # if W.shape[0] <= pow(im_neix, 2) or (W.shape[0] * 1. / X_presented.shape[0]) < 0.001:
+    #     dampen = 0.001
 
     for k in range(len(X_presented)):
         x = X_presented[k]
@@ -391,8 +391,8 @@ def train_for_input(x, X_presented, i, k, max_its, lrst, lrdec, im_neix, W, max_
     dampen = 1
     nei_sig = 1.
 
-    if W.shape[0] <= pow(im_neix , 2):
-        dampen = (W.shape[0] * 1. / X_presented.shape[0])
+    # if W.shape[0] <= pow(im_neix , 2):
+    #     dampen = (W.shape[0] * 1. / X_presented.shape[0])
 
     tau = np.float32((i * X_presented.shape[0] + k) * 1. / (max_its * X_presented.shape[0]))
     lr = np.float32((pow((1 - tau) , lrdec))) * dampen * reduced_lr
@@ -532,7 +532,7 @@ def embed_batch_epochs(Y, G, max_its, i_st, alpha, beta, rng_state, agility):
     tau = (i_st) * 1. / (max_its)
     tau_end = 1.
     epochs_per_sample = ((P_matrix)).astype(np.int32)
-    dampening_coefficient = .1 if G.shape[0] < 50 else 1
+    dampening_coefficient = 1 if G.shape[0] < 50 else 1
     starting_lr = (1 - tau) * dampening_coefficient
     ending_lr = (1 - tau_end) * dampening_coefficient
     epochs_per_negative_sample = ((P_matrix.max() - P_matrix) * 5).astype(np.int32)

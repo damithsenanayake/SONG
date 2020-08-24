@@ -4,8 +4,8 @@ from sklearn.metrics.pairwise import pairwise_distances_argmin
 from sklearn.manifold import SpectralEmbedding
 from sklearn.base import BaseEstimator
 from util import find_spread_tightness, \
-    train_for_input, train_for_batch_online, bulk_grow_sans_drifters, embed_batch_epochs, \
-    train_for_batch_batch, sq_eucl_opt
+    train_for_input, train_for_batch_online,  bulk_grow_sans_drifters, embed_batch_epochs, \
+    train_for_batch_batch, sq_eucl_opt, distances_and_neighbors
 
 INT32_MIN = np.iinfo(np.int32).min + 1
 INT32_MAX = np.iinfo(np.int32).max - 1
@@ -20,7 +20,7 @@ class SONG(BaseEstimator):
                  init=None,
                  agility=0.8, verbose=0,
                  max_age=1,
-                 random_seed=1, epsilon=1e-10, a=None, b=None, final_vector_count=None):
+                 random_seed=1, epsilon=1e-10, a=None, b=None, final_vector_count=None, coincidence_dispersion = 0.):
         ''' Initialize a SONG to reduce data.
 
         === General Hyperparameters ===
@@ -80,6 +80,7 @@ class SONG(BaseEstimator):
         self.max_age = max_age
         self.reduced_lr = 1.
         self.prototypes = None
+        self.dispersion = coincidence_dispersion
 
     def fit(self, X):
         '''
@@ -93,7 +94,7 @@ class SONG(BaseEstimator):
         verbose = self.verbose
         min_dist = self.min_dist
         spread = self.spread
-        self.ss = 25
+        self.ss = 35
         min_batch = 10
         self.max_its = self.ss * 2
         if self.alpha == None and self.beta == None:
@@ -109,12 +110,14 @@ class SONG(BaseEstimator):
         thresh_g = -np.log(X.shape[1]) * np.log(self.sf) * (scale)
 
         so_lr_st = self.lrst
-        print('prototypes {}'.format(self.prototypes))
-        if not self.fvc == None and self.prototypes == None:
-            self.prototypes = self.fvc
-        else:
-            self.prototypes = int(np.exp(np.log(X.shape[0])/1.5))
+        if self.prototypes == None:
+            if not self.fvc == None:
+                self.prototypes = self.fvc
+            else:
+                self.prototypes = int(np.exp(np.log(X.shape[0])/1.5))
         if verbose:
+            print('prototypes {}'.format(self.prototypes))
+
             print('starting lr for self organization : ' + str(so_lr_st))
         ''' Initialize coding vector weights and output coordinate system  '''
         ''' index of the last nearest neighbor : depends on output dimensionality. Higher the output dimensionality, 
@@ -159,7 +162,7 @@ class SONG(BaseEstimator):
         lrdec = 1.
         soeds = np.arange(self.ss)
         sratios = ((soeds) * 1. / (self.ss - 1))
-        batch_sizes = (X.shape[0] - min_batch) * sratios ** np.log10(X.shape[0]+100) + min_batch
+        batch_sizes = (X.shape[0] - min_batch) * sratios ** np.log10(X.shape[0]*100) + min_batch
         epsilon = self.epsilon
         lr_sigma = np.float32(np.log10(X.shape[0]) / 2.)
         non_growing_iter = 0
@@ -178,7 +181,7 @@ class SONG(BaseEstimator):
                 k = 0
                 shp = np.arange(G.shape[0]).astype(np.int32)
 
-                if not self.prototypes == None and self.prototypes >= G.shape[0]:
+                if self.prototypes >= G.shape[0]:
                     W, G, Y, E_q = bulk_grow_sans_drifters(shp, E_q, thresh_g, G, W, Y, X_presented)
                 shp = np.arange(G.shape[0], dtype=np.int32)
 
@@ -264,8 +267,23 @@ class SONG(BaseEstimator):
         return self.transform(X)
 
     def transform(self, X):
-        min_dist_args = pairwise_distances_argmin(X, self.W)
-        return self.Y[min_dist_args]
+        min_dist_args = []#
+        #pairwise_distances_argmin(X, self.W)
+
+        for x in X:
+            dists, neis = distances_and_neighbors(x.astype(np.float32), self.W, np.int32(1))
+            min_dist_args.append(neis[0])
+        output = self.Y[min_dist_args]
+        return  output + self.add_dispersion(min_dist_args)#np.random.random(output.shape) * self.dispersion
+
+    def add_dispersion(self, min_dist_args):
+
+        closest_dists = [np.sort(np.linalg.norm(self.Y[min_dist_args[i] ]- self.Y, axis=1))[1] for i in range(len(min_dist_args))]
+
+        noise = np.array(closest_dists).reshape((len(min_dist_args), 1)) * 0.5 * np.random.random(self.Y[min_dist_args].shape)*self.dispersion
+
+        return noise
+
 
     def get_representatives(self, X):
         min_dist_args = pairwise_distances_argmin(X, self.W)
