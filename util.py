@@ -15,6 +15,8 @@ def tau_rand_int(state):
     Returns
     -------
     A (pseudo)-random int32 value
+
+    similar to implementation used in https://github.com/lmcinnes/umap.git
     """
     state[0] = (((state[0] & 4294967294) << 12) & 0xffffffff) ^ (
             (((state[0] << 13) & 0xffffffff) ^ state[0]) >> 19
@@ -82,6 +84,15 @@ def sq_eucl_opt(A, B):
             C[i, j] = (acc_0)
 
     return C
+
+@numba.njit(fastmath=True)
+def get_closest_for_inputs(X, W):
+    min_dist_args = np.zeros(X.shape[0], dtype=np.int64)#
+    for i in range(len(X)):
+        dists, neis = distances_and_neighbors(X[i], W, np.int32(1))
+        min_dist_args[i] = neis[0]
+    return min_dist_args
+
 
 @numba.njit("Tuple((f4[:], i4[:]))(f4[:],f4[:,:], i8)", fastmath=True, parallel=True)
 def distances_and_neighbors(x, W, n_neis):
@@ -175,7 +186,7 @@ def bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y, X_presented):
 
         shp = np.arange(G.shape[0]).astype(np.int32)
 
-        if len(growing_nodes) > 1:
+        if len(growing_nodes) >= 1:
             for k in range(len(growing_nodes)):
                 b = growing_nodes[k]
                 ''' If no reusable nodes create new nodes'''
@@ -211,7 +222,7 @@ def bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y, X_presented):
                 E_q[closests] = 0.5
                 grown += 1
 
-    return W, G, Y, E_q, drifters
+    return W, G, Y, E_q
 
 
 @numba.njit(fastmath = True)
@@ -239,13 +250,13 @@ def bulk_grow_sans_drifters(shp, E_q, thresh_g, G, W, Y, X_presented):
 
         shp = np.arange(G.shape[0]).astype(np.int32)
 
-        if len(growing_nodes) > 1:
+        if len(growing_nodes) >= 1:
             for k in range(len(growing_nodes)):
                 b = growing_nodes[k]
                 ''' If no reusable nodes create new nodes'''
                 closests = shp[G[b] == 1]
                 if len(closests) == 0:
-                    continue
+                    closests = shp[G[:, b] == 1]
                 bias = 1e-5
                 W_n = (1 - bias) * W[b] + bias * (W[closests].sum(axis=0) / len(closests))
                 Y_n = (1 - bias) * Y[b] + bias * (Y[closests].sum(axis=0) / len(closests))
@@ -265,6 +276,8 @@ def bulk_grow_sans_drifters(shp, E_q, thresh_g, G, W, Y, X_presented):
                 G[closests][:, b] = 0
                 E_q[closests] = 0.5
 
+    if np.any(W.sum(axis=1) == 0):
+        raise Exception('zero vector found')
     return W, G, Y, E_q
 
 
@@ -277,7 +290,7 @@ def train_for_batch_online(X_presented, i, max_its, lrst, lrdec, im_neix, W, max
                            shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr):
 
     dampen = 1
-    nei_sig = 1.
+    nei_sig = 2.
     # if W.shape[0] <= pow(im_neix, 2):
     #     dampen = (W.shape[0] * 1./X_presented.shape[0])
     for k in range(len(X_presented)):
@@ -304,7 +317,7 @@ def train_for_batch_online(X_presented, i, max_its, lrst, lrdec, im_neix, W, max
             denom = np.float32(1.)
 
         epoch_vector = max_epochs_per_sample * ((G[b] + G[:, b]) / 2. + 1)
-        neg_epoch_vector = ns_rate* (1 - (G[b] + G[:, b]) / 2.)
+        neg_epoch_vector = ns_rate* (1 - (G[b] + G[:, b]) / 2.) + 1
 
         '''x, so_lr, b, W, hdist_nei, Y, alpha, beta , lr,  rng_state):'''
         W[neighbors], Y = train_neighborhood(x, so_lr, b, neighbors.astype(np.int32), W[neighbors],
@@ -317,7 +330,7 @@ def train_for_batch_online(X_presented, i, max_its, lrst, lrdec, im_neix, W, max
     return W, Y, G, E_q
 @numba.njit('i4[:](f4[:], i8)')
 def get_closest(dists_2, k):
-    neinds = [np.int32(1) for _ in range(k)]  # np.ones(n_neis, dtype=np.int32)
+    neinds = [1 for _ in range(k)]  # np.ones(n_neis, dtype=np.int32)
     n_W = len(dists_2)
     for i in range(n_W):
         dist2 = dists_2[i]
@@ -372,7 +385,7 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
             denom = np.float32(1.)
 
         epoch_vector = max_epochs_per_sample * ((G[b] + G[:, b]) / 2. + 1)
-        neg_epoch_vector = ns_rate* (1 - (G[b] + G[:, b]) / 2.)
+        neg_epoch_vector = ns_rate* (1 - (G[b] + G[:, b]) / 2.) + 1
 
         '''x, so_lr, b, W, hdist_nei, Y, alpha, beta , lr,  rng_state):'''
         W[neighbors], Y = train_neighborhood(x, so_lr, b, neighbors.astype(np.int32), W[neighbors],
@@ -443,7 +456,7 @@ def train_neighborhood(x, so_lr, b, neighbors, W, hdist_nei, Y, ns_rate, alpha, 
     hdists = hdist_nei
     y_b = Y[b]
     ''' Self Organizing '''
-    sigma = np.float32(np.log10(Y.shape[0])/2)
+    sigma = 1.#np.float32(np.log10(Y.shape[0])/2)
     for j in range(W.shape[0]):
         hdist = hdists[j]
         if neighbors[j] == b:
@@ -485,45 +498,6 @@ def train_neighborhood(x, so_lr, b, neighbors, W, hdist_nei, Y, ns_rate, alpha, 
                 y_b[i] -= positive_clip(pull_grad * (y_b[i] - Y_j[i]), 4) * lr
 
     return W, Y
-
-
-@numba.njit(fastmath=True)
-def interleaved_growth(b, W, Y, G, E_q, presented_len, thresh_g, neilist, shp):
-    growth_size = 1
-    if G.shape[0] < presented_len and thresh_g <= E_q[b]:
-        oldG = G
-        oldW = W
-        oldY = Y
-        oldE = E_q
-        closests = neilist
-        bias = 1e-5
-        W_n = (1 - bias) * W[b] + bias * (W[closests].sum(axis=0) / len(closests))
-        Y_n = (1 - bias) * Y[b] + bias * (Y[closests].sum(axis=0) / len(closests))
-        W = np.zeros((W.shape[0] + growth_size, W.shape[1]), dtype=np.float32)
-        W[:-growth_size] = oldW
-        W[-growth_size:] = W_n
-        Y = np.zeros((Y.shape[0] + growth_size, Y.shape[1]), dtype=np.float32)
-        Y[: -growth_size] = oldY
-
-        Y[-growth_size:] = Y_n
-        G = np.zeros((G.shape[0] + growth_size, G.shape[1] + growth_size), dtype=np.float32)
-        G[:-growth_size][:, :-growth_size] = oldG
-        ''' connect neighbors to the new node '''
-        G[-growth_size:][:, b] = 1
-        G[b][-growth_size:] = 1
-        G[-growth_size:][:, closests] = 1
-        G[closests][-growth_size:] = 1
-        G[b][closests] = 0
-        G[closests][:, b] = 0
-        ''' Append new error. '''
-        E_q = np.zeros(E_q.shape[0] + growth_size, dtype=np.float32)
-        E_q[:-growth_size] = oldE
-        E_q[-growth_size:] = 0
-        E_q[closests] *= 0.5
-        shp = np.arange(G.shape[0]).astype(np.int32)
-
-    return W, Y, G, E_q, shp
-
 
 @numba.njit('f4[:,:]( f4[:,:], f4[:, :], i4, i4, f4, f4, i8[:], f4 )', fastmath=True, )
 def embed_batch_epochs(Y, G, max_its, i_st, alpha, beta, rng_state, agility):
