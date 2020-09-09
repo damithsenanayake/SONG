@@ -4,31 +4,31 @@ from scipy.optimize import curve_fit
 
 
 @numba.njit("i4(i8[:])")
-def tau_rand_int(state):
-    """A fast (pseudo)-random number generator.
-
-    Parameters
-    ----------
-    state: array of int64, shape (3,)
-        The internal state of the rng
-
-    Returns
-    -------
-    A (pseudo)-random int32 value
-
-    similar to implementation used in https://github.com/lmcinnes/umap.git
+def fast_random_integer(random_state):
     """
-    state[0] = (((state[0] & 4294967294) << 12) & 0xffffffff) ^ (
-            (((state[0] << 13) & 0xffffffff) ^ state[0]) >> 19
-    )
-    state[1] = (((state[1] & 4294967288) << 4) & 0xffffffff) ^ (
-            (((state[1] << 2) & 0xffffffff) ^ state[1]) >> 25
-    )
-    state[2] = (((state[2] & 4294967280) << 17) & 0xffffffff) ^ (
-            (((state[2] << 3) & 0xffffffff) ^ state[2]) >> 11
-    )
+    XORShift Pseudorandom Number Generator (inspired by use in UMAP)
+    0xffffffff ensures 32bit truncation for faster operations
 
-    return state[0] ^ state[1] ^ state[2]
+    """
+    random_state[0] &= 6489292939
+    random_state[0] ^= random_state[0]<<13
+    random_state[0] ^= random_state[0]>>7
+    random_state[0] ^= random_state[0]<<17
+    random_state[0] &=  0xffffffff
+
+    random_state[0] &= 6498787687
+    random_state[1] ^= random_state[1] << 15
+    random_state[1] ^= random_state[1] >> 9
+    random_state[1] ^= random_state[1] << 17
+    random_state[1] &= 0xffffffff
+
+    random_state[0] &= 64654892939
+    random_state[2] ^= random_state[2] << 17
+    random_state[2] ^= random_state[2] >> 5
+    random_state[2] ^= random_state[2] << 3
+    random_state[2] &= 0xffffffff
+
+    return random_state[0] ^ random_state[1] ^ random_state[2]
 
 @numba.njit('f4[:,:](f4[:,:], f4[:,:])', fastmath=True, parallel=True)
 def sq_eucl_opt(A, B):
@@ -472,7 +472,7 @@ def train_neighborhood(x, so_lr, b, neighbors, W, hdist_nei, Y, ns_rate, alpha, 
         epochs = epoch_vector[neighbors[j]]
         for e in range(epochs):
             for p in range(neg_epoch_vector[neighbors[j]]):
-                n = tau_rand_int(rng_state) % Y.shape[0]
+                n = fast_random_integer(rng_state) % Y.shape[0]
                 ldist_sq = rdist(y_b, Y[n])
                 push_grad = (2 * beta)
                 denom = 1 + alpha * pow(ldist_sq, beta)
@@ -525,7 +525,7 @@ def embed_batch_epochs(Y, G, max_its, i_st, alpha, beta, rng_state, agility):
             neg_epochs = int(epochs_per_negative_sample[j][neighbors[k]])
             for ep in range(epochs):
                 for negs in range(neg_epochs):
-                    n = tau_rand_int(rng_state) % Y.shape[0]
+                    n = fast_random_integer(rng_state) % Y.shape[0]
                     current_neg_epochs = epochs_per_negative_sample[j][n]
                     epochs_per_negative_sample[j][n] -= 1
                     if current_neg_epochs > 0:
