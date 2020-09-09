@@ -1,7 +1,7 @@
 import numpy as np
 from sklearn.metrics.pairwise import pairwise_distances_argmin
 from sklearn.base import BaseEstimator
-from util import find_spread_tightness, \
+from song.util import find_spread_tightness, \
     train_for_batch_online, bulk_grow_sans_drifters, bulk_grow_with_drifters, embed_batch_epochs, \
     train_for_batch_batch, sq_eucl_opt, get_closest_for_inputs
 
