@@ -12,16 +12,16 @@ INT32_MAX = np.iinfo(np.int32).max - 1
 class SONG(BaseEstimator):
 
     def __init__(self, n_components=2, n_neighbors=3,
-                 lr=1., spread_factor=0.9,
+                 lr=1., gamma=None, so_steps = 30,
+                 spread_factor=0.9,
                  spread=1., min_dist=0.1, ns_rate=5,
-                 gamma=None,
-                 agility=0.8, verbose=0,
+                 agility=1., verbose=0,
                  max_age=1,
-                 random_seed=1, epsilon=1e-10, a=None, b=None, final_vector_count=None, coincidence_dispersion = 0., fast_portion = 0.8):
+                 random_seed=1, epsilon=1e-10, a=None, b=None, final_vector_count=None, coincidence_dispersion=0.,
+                 online_portion=0.8, fvc_growth=0.5):
 
         ''' Initialize a SONG to reduce data.
 
-        === General Hyperparameters ===
         :param n_components : Dimensionality of the required output. Default set at 2 dimensions
 
         :param n_neighbors : Neighborhood size of the Neural (Coding Vector) Graph. Keep it low (1 or 2) for clear
@@ -31,29 +31,42 @@ class SONG(BaseEstimator):
         :param lr : Learning Rate starting value. Set at 1.0. For large data sets, smaller values may be required
         to prevent cluster drifts
 
-        :param gamma : This variable governs the growth rate of the map. 0 provides fastest growth, which may result in
-        noisy representations. Default set at 2 .
+        :param gamma : This variable governs the sampling schedule of the algorithm. Higher gamma will force SONG to
+         start with smaller sample numbers and progressively reach the full dataset in each self-organizing iteration.
+         gamma = 0. will sample the full dataset at each self-organizing iteration.
 
-        :param so_steps : How many self organization steps are required. Higher
-        :param its : Number of learning iterations (Including the self-organizing steps)
+        :param so_steps : How many self organization steps are required. Higher numbers of so_steps will cause better
+        visualization at the cost of running time.
 
         :param spread_factor : Spread Factor as defined in the work by Alahakoon et al (2000). Values in (0, 1). Higher
-        values result in higher resolutions, and finer grain clusterings, but inhibits time consumption performance.
-
-        :param lr_decay_const : Learning rate decay governed by this hyperparameter. set at 1 for a linear decay. 2
-        provides a quadratic decay and so on.
+        values result in higher resolutions, and finer grain clustering, but inhibits time consumption performance.
 
         :param verbose : Print out learning process on command line.
 
-
-        === Incremental Learning Hyperparameters ===
         :param agility : A more agile map will adopt the map to new data (growth and all) faster than an inert map.
         Setting agility == 1. will treat all new data as equally weighed to old data. agility = (0, 1].
 
-        === Visualization Hyperparameters ===
         :param spread : Hyperparameter to govern how spread-out the visualization needs to be.
 
         :param min_dist : Hyperparameter to govern how close together neighbors should be.
+
+        :param epsilon : The edge-strength decay constant. Set at a small value for sparse graph generation. For dense
+        graphs, use a higher value (close to 1.0 but less than 1.0).
+
+        :param max_age : parameter to define the lowest permitted edge-strength in the graph. Higher the max_age, the
+        smaller the minimum edge-strength.
+
+        :param a : constant term for the rational quadratic kernel
+
+        :param b : constant term for the rational quadratic kernel
+
+        :param final_vector_count : the number of expected final coding vectors.
+
+        :param online_portion : the portion of online distance calculation operations. if 1.0 all distances will be
+        calculated online for all iterations. If 0.5, the latter half will be calculated batch-wise. Can be (0, 1.].
+
+        :param fvc_growth: In incremental scenarios, what is the expected growth ratio of coding vectors in subsequent
+        visualizations.
 
         '''
 
@@ -79,11 +92,11 @@ class SONG(BaseEstimator):
         self.reduced_lr = 1.
         self.prototypes = None
         self.dispersion = coincidence_dispersion
-        self.fast_portion = fast_portion
+        self.fast_portion = online_portion
         self.min_strength = epsilon ** ((self.dim + self.max_age))
-        self.ss = 30
+        self.ss = so_steps
         self.max_its = self.ss * 2
-
+        self.prot_inc_portion = fvc_growth
 
     def fit(self, X):
         '''
@@ -114,7 +127,7 @@ class SONG(BaseEstimator):
             if not self.fvc is None:
                 self.prototypes = self.fvc
             else:
-                self.prototypes = int(np.exp(np.log(X.shape[0])/1.5))
+                self.prototypes = int(np.exp(np.log(X.shape[0]) / 1.5))
         ''' Initialize coding vector weights and output coordinate system  '''
         ''' index of the last nearest neighbor : depends on output dimensionality. Higher the output dimensionality, 
                        higher the connectedness '''
@@ -128,7 +141,8 @@ class SONG(BaseEstimator):
             G = self.G
             Y = self.Y
             E_q = self.E_q
-
+            self.prototypes += self.prototypes * self.prot_inc_portion
+            self.prototypes = np.int(self.prototypes)
             if verbose:
                 print('Using Trained Map')
         except:
@@ -136,7 +150,7 @@ class SONG(BaseEstimator):
             init_size = im_neix
             W = X[self.random_state.choice(X.shape[0], init_size)] + self.random_state.random_sample(
                 (init_size, X.shape[1])).astype(np.float32) * 0.0001
-            Y = self.random_state.random_sample((init_size, self.dim)).astype(np.float32)  # / self.min_dist
+            Y = self.random_state.random_sample((init_size, self.dim)).astype(np.float32)
             if verbose:
                 print('random map initialization')
 
@@ -151,7 +165,7 @@ class SONG(BaseEstimator):
         lrdec = 1.
         soeds = np.arange(self.ss)
         sratios = ((soeds) * 1. / (self.ss - 1))
-        batch_sizes = (X.shape[0] - min_batch) * sratios ** np.log10(X.shape[0]*100) + min_batch
+        batch_sizes = (X.shape[0] - min_batch) * sratios ** np.log10(X.shape[0] * 100) + min_batch
         epsilon = self.epsilon
         lr_sigma = np.float32(np.log10(X.shape[0]) / 2.)
         drifters = np.array([])
@@ -161,7 +175,7 @@ class SONG(BaseEstimator):
                 presented_len = int(batch_sizes[soed])
                 soed += 1
             X_presented = X[order[:presented_len]]
-            if not i%2:
+            if not i % 2:
                 non_growing_iter = 0
                 shp = np.arange(G.shape[0]).astype(np.int32)
 
@@ -179,13 +193,16 @@ class SONG(BaseEstimator):
 
                 if verbose:
                     print(
-                        '\r Training with Self Organization for all presented inputs in this batch i = {} , |X| = {} , |G| = {}  '.format(
+                        '\r Training with Self Organization for all presented inputs in this batch i = {} , |X| = {} '
+                        ', |G| = {}  '.format(
                             i + 1, presented_len, G.shape[0]), end='')
-                if (i * 1./self.max_its <= self.fast_portion) or X.shape[0] < 10000:
+                if (i * 1. / self.max_its <= self.fast_portion) or X.shape[0] < 10000:
 
                     W, Y, G, E_q = train_for_batch_online(X_presented, i, self.max_its, lrst, lrdec, im_neix, W,
-                                                      self.max_epochs_per_sample, G, epsilon, self.min_strength, shp, Y,
-                                                      self.ns_rate, alpha, beta, self.rng_state, E_q, lr_sigma, self.reduced_lr)
+                                                          self.max_epochs_per_sample, G, epsilon, self.min_strength,
+                                                          shp, Y,
+                                                          self.ns_rate, alpha, beta, self.rng_state, E_q, lr_sigma,
+                                                          self.reduced_lr)
 
                 else:
                     too_big = False
@@ -195,10 +212,12 @@ class SONG(BaseEstimator):
                         too_big = True
 
                     if not too_big:
-                        W, Y, G, E_q = train_for_batch_batch(X_presented, pdists, i, self.max_its, lrst, lrdec, im_neix, W,
-                                                          self.max_epochs_per_sample, G, epsilon, self.min_strength,
-                                                          shp, Y,
-                                                          self.ns_rate, alpha, beta, self.rng_state, E_q, lr_sigma, self.reduced_lr)
+                        W, Y, G, E_q = train_for_batch_batch(X_presented, pdists, i, self.max_its, lrst, lrdec, im_neix,
+                                                             W,
+                                                             self.max_epochs_per_sample, G, epsilon, self.min_strength,
+                                                             shp, Y,
+                                                             self.ns_rate, alpha, beta, self.rng_state, E_q, lr_sigma,
+                                                             self.reduced_lr)
 
                     else:
                         chunk_size = 1000
@@ -209,10 +228,13 @@ class SONG(BaseEstimator):
                             chunk_en = chunk_st + chunk_size
                             X_chunk = X_presented[chunk_st:chunk_en]
                             pdists = sq_eucl_opt(X_chunk, W).astype(np.float32)
-                            W, Y, G, E_q = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, lrdec, im_neix, W,
-                                                                 self.max_epochs_per_sample, G, epsilon, self.min_strength,
+                            W, Y, G, E_q = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, lrdec, im_neix,
+                                                                 W,
+                                                                 self.max_epochs_per_sample, G, epsilon,
+                                                                 self.min_strength,
                                                                  shp, Y,
-                                                                 self.ns_rate, alpha, beta, self.rng_state, E_q, lr_sigma, self.reduced_lr)
+                                                                 self.ns_rate, alpha, beta, self.rng_state, E_q,
+                                                                 lr_sigma, self.reduced_lr)
 
                 drifters = np.where(G.sum(axis=1) == 0)[0]
             else:
@@ -220,15 +242,15 @@ class SONG(BaseEstimator):
 
                 if verbose:
                     print(
-                        '\rTraining iteration %i without self organization :  Map size : %i, SOED : %i , Batch Size : %i' % (
+                        '\rTraining iteration %i without self organization :  Map size : %i, SOED : %i , Batch Size : '
+                        '%i' % (
                             i + 1, G.shape[0], soed, embed_length), end='')
                 repeats = 1 if not soed == self.ss else 1
                 for repeat in range(repeats):
                     Y = embed_batch_epochs(Y, G, self.max_its, i, alpha, beta, self.rng_state, self.reduced_lr)
                 non_growing_iter += 1
 
-
-        self.reduced_lr =self.reduced_lr * self.agility
+        self.reduced_lr = self.reduced_lr * self.agility
         self.W = W
         self.Y = Y
         self.G = G
@@ -246,11 +268,12 @@ class SONG(BaseEstimator):
         min_dist_args = get_closest_for_inputs(np.float32(X), self.W)
 
         output = self.Y[min_dist_args]
-        return  output + 0 if self.dispersion == 0 else self.add_dispersion(min_dist_args)
+        return output + 0 if self.dispersion == 0 else self.add_dispersion(min_dist_args)
 
     def add_dispersion(self, min_dist_args):
 
-        closest_dists = [np.sort(np.linalg.norm(self.Y[min_dist_args[i] ]- self.Y, axis=1))[1] for i in range(len(min_dist_args))]
+        closest_dists = [np.sort(np.linalg.norm(self.Y[min_dist_args[i]] - self.Y, axis=1))[1] for i in
+                         range(len(min_dist_args))]
 
         jitter = self.random_state.random(self.Y[min_dist_args].shape)
         jitter -= 0.5
@@ -258,14 +281,12 @@ class SONG(BaseEstimator):
         jitter /= np.linalg.norm(jitter, axis=1).reshape((jitter.shape[0], 1))
         jitter *= 2
 
-
         jitter_rad = self.random_state.random((jitter.shape[0], 1))
         jitter *= jitter_rad
 
-        noise = np.array(closest_dists).reshape((len(min_dist_args), 1)) * 0.5 * jitter *self.dispersion
+        noise = np.array(closest_dists).reshape((len(min_dist_args), 1)) * 0.5 * jitter * self.dispersion
 
         return noise
-
 
     def get_representatives(self, X):
         min_dist_args = pairwise_distances_argmin(X, self.W)
