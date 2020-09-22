@@ -14,7 +14,7 @@ class SONG(BaseEstimator):
     def __init__(self, n_components=2, n_neighbors=3,
                  lr=1., gamma=None, so_steps = 30,
                  spread_factor=0.9,
-                 spread=1., min_dist=0.1, ns_rate=5,
+                 spread=1., min_dist=0.1, ns_rate=10,
                  agility=1., verbose=0,
                  max_age=1,
                  random_seed=1, epsilon=1e-10, a=None, b=None, final_vector_count=None, coincidence_dispersion=0.,
@@ -116,7 +116,7 @@ class SONG(BaseEstimator):
         else:
             alpha = self.alpha
             beta = self.beta
-        scale = np.median(np.linalg.norm(X, axis=1)) ** 2.
+        scale = np.median(np.linalg.norm(X-X.mean(axis=0), axis=1)) ** 2.
 
         if self.sf is None:
             self.sf = np.log(4) / (2 * self.ss)

@@ -194,9 +194,10 @@ def bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y, X_presented):
                 if len(closests) == 0:
                     drifters = np.append(drifters, b)
                     continue
-                bias = 1e-5
-                W_n = (1-bias) * W[b] + bias * (W[closests].sum(axis=0) / len(closests))
-                Y_n = (1-bias) * Y[b] + bias * (Y[closests].sum(axis=0) / len(closests))
+                h_bias = 1e-1
+                l_bias = 1e-8
+                W_n = (1-h_bias) * W[b] + h_bias * (W[closests].sum(axis=0) / len(closests))
+                Y_n = (1-l_bias) * Y[b] + l_bias * (Y[closests].sum(axis=0) / len(closests))
                 if grown >= len(drifters):
                     W[old_size + grown - len(drifters)] = W_n
 
@@ -257,9 +258,10 @@ def bulk_grow_sans_drifters(shp, E_q, thresh_g, G, W, Y, X_presented):
                 closests = shp[G[b] == 1]
                 if len(closests) == 0:
                     closests = shp[G[:, b] == 1]
-                bias = 1e-5
-                W_n = (1 - bias) * W[b] + bias * (W[closests].sum(axis=0) / len(closests))
-                Y_n = (1 - bias) * Y[b] + bias * (Y[closests].sum(axis=0) / len(closests))
+                h_bias = 1e-1
+                l_bias = 1e-8
+                W_n = (1 - h_bias) * W[b] + h_bias * (W[closests].sum(axis=0) / len(closests))
+                Y_n = (1 - l_bias) * Y[b] + l_bias * (Y[closests].sum(axis=0) / len(closests))
                 W[old_size + k ] = W_n
 
                 Y[old_size + k] = Y_n
@@ -289,14 +291,11 @@ def get_so_rate(tau, sigma):
 def train_for_batch_online(X_presented, i, max_its, lrst, lrdec, im_neix, W, max_epochs_per_sample, G, epsilon, min_strength,
                            shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr):
 
-    dampen = 1
-    nei_sig = 2.
-    # if W.shape[0] <= pow(im_neix, 2):
-    #     dampen = (W.shape[0] * 1./X_presented.shape[0])
+
     for k in range(len(X_presented)):
         x = X_presented[k]
         tau = np.float32((i * X_presented.shape[0] + k) * 1. / (max_its * X_presented.shape[0]))
-        lr = np.float32((pow((1 - tau) , lrdec))) * dampen * reduced_lr
+        lr = np.float32((pow((1 - tau) , lrdec))) * reduced_lr
         so_lr = lrst*get_so_rate(i * 1./max_its, lr_sigma)
 
         nei_len = np.int32(min(im_neix, W.shape[0]))
@@ -313,9 +312,6 @@ def train_for_batch_online(X_presented, i, max_its, lrst, lrdec, im_neix, W, max
 
         denom = dist_H[neilist[-1]]
 
-        if denom == 0 :
-            denom = np.float32(1.)
-
         epoch_vector = max_epochs_per_sample * ((G[b] + G[:, b]) / 2. + 1)
         neg_epoch_vector = ns_rate* (1 - (G[b] + G[:, b]) / 2.) + 1
 
@@ -324,8 +320,8 @@ def train_for_batch_online(X_presented, i, max_its, lrst, lrdec, im_neix, W, max
                                              dist_H[neighbors] / denom,
                                              Y, ns_rate, alpha, beta,
                                              lr, rng_state, epoch_vector.astype(np.int32),
-                                             neg_epoch_vector.astype(np.int32), nei_sig)
-        E_q[b] += dist_H[0]
+                                             neg_epoch_vector.astype(np.int32))
+        E_q[b] += dist_H[b]
 
     return W, Y, G, E_q
 @numba.njit('i4[:](f4[:], i8)')
@@ -356,15 +352,11 @@ def get_closest(dists_2, k):
 @numba.njit(fastmath=True, )
 def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im_neix, W, max_epochs_per_sample, G, epsilon, min_strength,
                            shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr):
-    dampen = 1
-    nei_sig = 1.
-    # if W.shape[0] <= pow(im_neix, 2) or (W.shape[0] * 1. / X_presented.shape[0]) < 0.001:
-    #     dampen = 0.001
 
     for k in range(len(X_presented)):
         x = X_presented[k]
         tau = np.float32((i * X_presented.shape[0] + k) * 1. / (max_its * X_presented.shape[0]))
-        lr = np.float32((pow((1 - tau) , lrdec))) * dampen * reduced_lr
+        lr = np.float32((pow((1 - tau) , lrdec))) * reduced_lr
         so_lr = lrst*get_so_rate(i * 1./max_its, lr_sigma)
 
         nei_len = np.int32(min(im_neix, W.shape[0]))
@@ -381,8 +373,6 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
         neighbors = shp[nei_bin]
 
         denom = dist_H[neilist[-1]]
-        if denom == 0 :
-            denom = np.float32(1.)
 
         epoch_vector = max_epochs_per_sample * ((G[b] + G[:, b]) / 2. + 1)
         neg_epoch_vector = ns_rate* (1 - (G[b] + G[:, b]) / 2.) + 1
@@ -392,8 +382,8 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
                                              dist_H[neighbors] / denom,
                                              Y, ns_rate, alpha, beta,
                                              lr, rng_state, epoch_vector.astype(np.int32),
-                                             neg_epoch_vector.astype(np.int32), nei_sig)
-        E_q[b] += dist_H[0]
+                                             neg_epoch_vector.astype(np.int32))
+        E_q[b] += dist_H[b]
 
     return W, Y, G, E_q
 
@@ -402,10 +392,6 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
 def train_for_input(x, X_presented, i, k, max_its, lrst, lrdec, im_neix, W, max_epochs_per_sample, G, epsilon,
                     min_strength, shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr):
     dampen = 1
-    nei_sig = 1.
-
-    # if W.shape[0] <= pow(im_neix , 2):
-    #     dampen = (W.shape[0] * 1. / X_presented.shape[0])
 
     tau = np.float32((i * X_presented.shape[0] + k) * 1. / (max_its * X_presented.shape[0]))
     lr = np.float32((pow((1 - tau) , lrdec))) * dampen * reduced_lr
@@ -428,10 +414,7 @@ def train_for_input(x, X_presented, i, k, max_its, lrst, lrdec, im_neix, W, max_
     neighbors = shp[(G[b] + G[:, b]) > 0]
 
     denom = dist_H[neilist[-1]]
-    if denom == 0:
-        denom = np.float32(1.)
 
-    dist_H[neilist[0]] = 0
 
     epoch_vector = max_epochs_per_sample * ( (G[b] + G[:, b]) / 2. + 1)
 
@@ -442,26 +425,25 @@ def train_for_input(x, X_presented, i, k, max_its, lrst, lrdec, im_neix, W, max_
                                          dist_H[neighbors] / denom,
                                          Y, ns_rate, alpha, beta,
                                          lr, rng_state, epoch_vector.astype(np.int32),
-                                         neg_epoch_vector.astype(np.int32), nei_sig)
-    E_q[b] += dist_H[0]
+                                         neg_epoch_vector.astype(np.int32))
+    E_q[b] += dist_H[b]
 
     return W, Y, G, E_q, k, b, neilist, neighbors, lr
 
 
 @numba.njit(
-    'UniTuple(f4[:, :], 2)(f4[:], f4,  i4, i4[:],  f4[:,:], f4[:], f4[:,:], i4, f4, f4, f4, i8[:], i4[:], i4[:], f4)',
+    'UniTuple(f4[:, :], 2)(f4[:], f4,  i4, i4[:],  f4[:,:], f4[:], f4[:,:], i4, f4, f4, f4, i8[:], i4[:], i4[:])',
     fastmath=True, )
 def train_neighborhood(x, so_lr, b, neighbors, W, hdist_nei, Y, ns_rate, alpha, beta, lr, rng_state, epoch_vector,
-                       neg_epoch_vector, sigma):
+                       neg_epoch_vector):
     hdists = hdist_nei
     y_b = Y[b]
     ''' Self Organizing '''
-    sigma = 1.#np.float32(np.log10(Y.shape[0])/2)
+    sigma = 1
     for j in range(W.shape[0]):
         hdist = hdists[j]
-        if neighbors[j] == b:
-            hdist = 0
-        h_pull_grad = np.exp(-sigma * hdist)
+
+        h_pull_grad =  1. if neighbors[j] == b else np.exp(-sigma * hdist)
         for i in range(x.shape[0]):
             W[j][i] += h_pull_grad * so_lr * (x[i] - W[j][i])
 
