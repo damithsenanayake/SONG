@@ -85,12 +85,20 @@ def sq_eucl_opt(A, B):
 
     return C
 
-@numba.njit(fastmath=True)
+# @numba.njit(fastmath=True)
 def get_closest_for_inputs(X, W):
     min_dist_args = np.zeros(X.shape[0], dtype=np.int64)#
-    for i in range(len(X)):
-        dists, neis = distances_and_neighbors(X[i], W, np.int32(1))
-        min_dist_args[i] = neis[0]
+    batch_len = 5000
+
+    for b in range(len(X)//batch_len + 1):
+
+        pdists = sq_eucl_opt(X[b * batch_len : (b+1) * batch_len], W)
+
+        min_dist_args[b*batch_len: (b+1) * batch_len] = pdists.argmin(axis=1)
+
+    # for i in range(len(X)):
+    #     dists, neis = distances_and_neighbors(X[i], W, np.int32(1))
+    #     min_dist_args[i] = neis[0]
     return min_dist_args
 
 
@@ -160,10 +168,10 @@ def rdist(x, y):
 
 
 @numba.njit(fastmath = True)
-def bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y, X_presented):
+def bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y):
     growth_size = max(0, len(shp[E_q >= thresh_g]) - len(drifters))
 
-    if growth_size and G.shape[0] < 10000 and G.shape[0] < X_presented.shape[0]:
+    if growth_size:
         oldG = G
         oldW = W
         oldY = Y
@@ -227,10 +235,10 @@ def bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y, X_presented):
 
 
 @numba.njit(fastmath = True)
-def bulk_grow_sans_drifters(shp, E_q, thresh_g, G, W, Y, X_presented):
+def bulk_grow_sans_drifters(shp, E_q, thresh_g, G, W, Y):
     growth_size = max(0, len(shp[E_q >= thresh_g]))
 
-    if growth_size and G.shape[0] < 10000 and G.shape[0] < X_presented.shape[0]:
+    if growth_size:
         oldG = G
         oldW = W
         oldY = Y
@@ -353,13 +361,14 @@ def get_closest(dists_2, k):
 def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im_neix, W, max_epochs_per_sample, G, epsilon, min_strength,
                            shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr):
 
+
+    taus = ((i * X_presented.shape[0] + np.arange(len(X_presented)).astype(np.float32)) * 1. / (max_its * X_presented.shape[0]))
+    lrs = (1-taus)* reduced_lr
+    so_lr = lrst * get_so_rate(i * 1. / max_its, lr_sigma)
+    nei_len = np.int32(min(im_neix, W.shape[0]))
+
     for k in range(len(X_presented)):
         x = X_presented[k]
-        tau = np.float32((i * X_presented.shape[0] + k) * 1. / (max_its * X_presented.shape[0]))
-        lr = np.float32((pow((1 - tau) , lrdec))) * reduced_lr
-        so_lr = lrst*get_so_rate(i * 1./max_its, lr_sigma)
-
-        nei_len = np.int32(min(im_neix, W.shape[0]))
         dist_H = pdist_matrix[k]
         neilist = get_closest(dist_H, nei_len)
 
@@ -381,7 +390,7 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
         W[neighbors], Y = train_neighborhood(x, so_lr, b, neighbors.astype(np.int32), W[neighbors],
                                              dist_H[neighbors] / denom,
                                              Y, ns_rate, alpha, beta,
-                                             lr, rng_state, epoch_vector.astype(np.int32),
+                                             lrs[k], rng_state, epoch_vector.astype(np.int32),
                                              neg_epoch_vector.astype(np.int32))
         E_q[b] += dist_H[b]
 

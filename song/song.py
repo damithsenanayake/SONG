@@ -1,6 +1,9 @@
 import numpy as np
-from sklearn.metrics.pairwise import pairwise_distances_argmin
+import scipy as sp
+from sklearn.metrics import pairwise_distances_argmin
+from scipy.sparse import issparse, csr_matrix
 from sklearn.base import BaseEstimator
+
 from song.util import find_spread_tightness, \
     train_for_batch_online, bulk_grow_sans_drifters, bulk_grow_with_drifters, embed_batch_epochs, \
     train_for_batch_batch, sq_eucl_opt, get_closest_for_inputs
@@ -12,13 +15,13 @@ INT32_MAX = np.iinfo(np.int32).max - 1
 class SONG(BaseEstimator):
 
     def __init__(self, n_components=2, n_neighbors=3,
-                 lr=1., gamma=None, so_steps = 30,
+                 lr=1., gamma=None, so_steps = None,
                  spread_factor=0.9,
                  spread=1., min_dist=0.1, ns_rate=10,
                  agility=1., verbose=0,
                  max_age=1,
                  random_seed=1, epsilon=1e-10, a=None, b=None, final_vector_count=None, coincidence_dispersion=0.,
-                 online_portion=0.8, fvc_growth=0.5):
+                 online_portion=0.8, fvc_growth=0.5, non_so_rate = 5, low_memory = False):
 
         ''' Initialize a SONG to reduce data.
 
@@ -95,8 +98,10 @@ class SONG(BaseEstimator):
         self.fast_portion = online_portion
         self.min_strength = epsilon ** ((self.dim + self.max_age))
         self.ss = so_steps
-        self.max_its = self.ss * 2
+        self.non_so_rate = non_so_rate
         self.prot_inc_portion = fvc_growth
+        self.low_memory = low_memory
+        self.trained = False
 
     def fit(self, X):
         '''
@@ -107,8 +112,14 @@ class SONG(BaseEstimator):
         '''
 
         verbose = self.verbose
+        sparse = issparse(X)
         min_dist = self.min_dist
         spread = self.spread
+
+        self.low_memory = self.low_memory or sparse # Treat sparse as low-memory setting
+        if self.ss is None:
+            self.ss = (X.shape[0]//1000 * (5 if X.shape[0] < 100000 else 2)) if self.low_memory else (30 if X.shape[0] > 100000 else 30)
+        self.max_its = self.ss * self.non_so_rate
 
         min_batch = 1000
         if self.alpha is None and self.beta is None:
@@ -116,7 +127,8 @@ class SONG(BaseEstimator):
         else:
             alpha = self.alpha
             beta = self.beta
-        scale = np.median(np.linalg.norm(X-X.mean(axis=0), axis=1)) ** 2.
+
+        scale = np.median(np.linalg.norm(X-X.mean(axis=0), axis=1) if not sparse else sp.sparse.linalg.norm(csr_matrix(X - X.mean(axis=0)), axis=1)) ** 2.
 
         if self.sf is None:
             self.sf = np.log(4) / (2 * self.ss)
@@ -135,7 +147,7 @@ class SONG(BaseEstimator):
         im_neix = self.dim + self.n_neighbors
 
         X = X.astype(np.float32)
-        try:
+        if self.trained:
             ''' When reusing a trained model, this block will be executed.'''
             W = self.W
             G = self.G
@@ -145,7 +157,7 @@ class SONG(BaseEstimator):
             self.prototypes = np.int(self.prototypes)
             if verbose:
                 print('Using Trained Map')
-        except:
+        else:
             ''' If the model is not already initialized ...'''
             init_size = im_neix
             W = X[self.random_state.choice(X.shape[0], init_size)] + self.random_state.random_sample(
@@ -153,6 +165,7 @@ class SONG(BaseEstimator):
             Y = self.random_state.random_sample((init_size, self.dim)).astype(np.float32)
             if verbose:
                 print('random map initialization')
+                print('Stopping at {} prototypes'.format(self.prototypes))
 
             ''' Initialize Graph Adjacency and Weight Matrices '''
             G = np.identity(W.shape[0]).astype(np.float32)
@@ -165,17 +178,17 @@ class SONG(BaseEstimator):
         lrdec = 1.
         soeds = np.arange(self.ss)
         sratios = ((soeds) * 1. / (self.ss - 1))
-        batch_sizes = (X.shape[0] - min_batch) * sratios ** np.log10(X.shape[0] * 100) + min_batch
+        batch_sizes = (X.shape[0] - min_batch) * (sratios * 0 if self.low_memory else sratios ** (np.log10(X.shape[0])) ) + min_batch
         epsilon = self.epsilon
         lr_sigma = np.float32(np.log10(X.shape[0]) / 2.)
         drifters = np.array([])
         for i in range(self.max_its):
             order = self.random_state.permutation(X.shape[0])
-            if not i % 2:
+            if not i % self.non_so_rate:
                 presented_len = int(batch_sizes[soed])
                 soed += 1
             X_presented = X[order[:presented_len]]
-            if not i % 2:
+            if not i % self.non_so_rate:
                 non_growing_iter = 0
                 shp = np.arange(G.shape[0]).astype(np.int32)
 
@@ -184,19 +197,18 @@ class SONG(BaseEstimator):
                     ''' Growing of new coding vectors and low-dimensional vectors '''
 
                     if not len(drifters):
-                        W, G, Y, E_q = bulk_grow_sans_drifters(shp, E_q, thresh_g, G, W, Y, X_presented)
+                        W, G, Y, E_q = bulk_grow_sans_drifters(shp, E_q, thresh_g, G, W, Y)
                     else:
-                        W, G, Y, E_q = bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y, X_presented)
+                        W, G, Y, E_q = bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y)
 
                 '''shp is an index set used for optimizing search operations'''
                 shp = np.arange(G.shape[0], dtype=np.int32)
 
                 if verbose:
                     print(
-                        '\r Training with Self Organization for all presented inputs in this batch i = {} , |X| = {} '
-                        ', |G| = {}  '.format(
-                            i + 1, presented_len, G.shape[0]), end='')
-                if (i * 1. / self.max_its <= self.fast_portion) or X.shape[0] < 10000:
+                        '\r Training with SO epoch {} / {} , |X| = {} , |G| = {}  '.format(
+                            i + 1, self.max_its, presented_len, G.shape[0]), end='')
+                if ((i * 1. / self.max_its < self.fast_portion) or X.shape[0] < 10000) and not sparse:
 
                     W, Y, G, E_q = train_for_batch_online(X_presented, i, self.max_its, lrst, lrdec, im_neix, W,
                                                           self.max_epochs_per_sample, G, epsilon, self.min_strength,
@@ -205,13 +217,10 @@ class SONG(BaseEstimator):
                                                           self.reduced_lr)
 
                 else:
-                    too_big = False
-                    try:
-                        pdists = sq_eucl_opt(X_presented, W).astype(np.float32)
-                    except MemoryError:
-                        too_big = True
+                    # too_big = False
+                    if not self.low_memory and not sparse:
 
-                    if not too_big:
+                        pdists = sq_eucl_opt(X_presented, W).astype(np.float32)
                         W, Y, G, E_q = train_for_batch_batch(X_presented, pdists, i, self.max_its, lrst, lrdec, im_neix,
                                                              W,
                                                              self.max_epochs_per_sample, G, epsilon, self.min_strength,
@@ -220,13 +229,16 @@ class SONG(BaseEstimator):
                                                              self.reduced_lr)
 
                     else:
-                        chunk_size = 1000
+                        chunk_size = 10000 if not sparse else 1000
                         chunks = X_presented.shape[0] // chunk_size
 
                         for chunk in range(chunks + 1):
                             chunk_st = chunk * chunk_size
                             chunk_en = chunk_st + chunk_size
                             X_chunk = X_presented[chunk_st:chunk_en]
+                            if sparse:
+                                X_chunk = X_chunk.todense()
+
                             pdists = sq_eucl_opt(X_chunk, W).astype(np.float32)
                             W, Y, G, E_q = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, lrdec, im_neix,
                                                                  W,
@@ -238,13 +250,9 @@ class SONG(BaseEstimator):
 
                 drifters = np.where(G.sum(axis=1) == 0)[0]
             else:
-                embed_length = len(X_presented)
-
                 if verbose:
-                    print(
-                        '\rTraining iteration %i without self organization :  Map size : %i, SOED : %i , Batch Size : '
-                        '%i' % (
-                            i + 1, G.shape[0], soed, embed_length), end='')
+                    print('\r Training sans SO epoch {} / {} , |X| = {} , |G| = {}  '.format(i + 1, self.max_its, presented_len, G.shape[0]), end='')
+
                 repeats = 1 if not soed == self.ss else 1
                 for repeat in range(repeats):
                     Y = embed_batch_epochs(Y, G, self.max_its, i, alpha, beta, self.rng_state, self.reduced_lr)
@@ -256,16 +264,29 @@ class SONG(BaseEstimator):
         self.G = G
         self.E_q = E_q * 0
         self.so_lr_st = so_lr_st
+        self.trained = True
         if verbose:
             print('\n Done ...')
         return self
+
+    def batch_train(self, X):
+        pass
 
     def fit_transform(self, X):
         self.fit(X)
         return self.transform(X)
 
     def transform(self, X):
-        min_dist_args = get_closest_for_inputs(np.float32(X), self.W)
+        if not issparse(X):
+            min_dist_args = get_closest_for_inputs(np.float32(X), self.W)
+        else:
+            min_dist_args = []
+
+            chunk = 1000
+
+            for i in range(X.shape[0]//chunk + 1):
+                X_b = X[i * chunk : (i+1) * chunk].todense()
+                min_dist_args.extend(list(get_closest_for_inputs(np.float32(X_b), self.W)))
 
         output = self.Y[min_dist_args]
         return output + 0 if self.dispersion == 0 else self.add_dispersion(min_dist_args)
