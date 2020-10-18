@@ -128,7 +128,7 @@ class SONG(BaseEstimator):
             alpha = self.alpha
             beta = self.beta
 
-        scale = np.median(np.linalg.norm(X-X.mean(axis=0), axis=1) if not sparse else sp.sparse.linalg.norm(csr_matrix(X - X.mean(axis=0)), axis=1)) ** 2.
+        scale = np.median(np.linalg.norm(X-X.mean(axis=0), axis=1) if not sparse else sp.sparse.linalg.norm(csr_matrix(X), axis=1)) ** 2.
 
         if self.sf is None:
             self.sf = np.log(4) / (2 * self.ss)
