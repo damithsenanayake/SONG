@@ -19,7 +19,7 @@ class SONG(BaseEstimator):
                  spread_factor=0.9,
                  spread=1., min_dist=0.1, ns_rate=10,
                  agility=1., verbose=0,
-                 max_age=1,
+                 max_age=3,
                  random_seed=1, epsilon=1e-10, a=None, b=None, final_vector_count=None, coincidence_dispersion=0.,
                  online_portion=0.8, fvc_growth=0.5, non_so_rate = 5, low_memory = False):
 
@@ -118,7 +118,7 @@ class SONG(BaseEstimator):
 
         self.low_memory = self.low_memory or sparse # Treat sparse as low-memory setting
         if self.ss is None:
-            self.ss = (X.shape[0]//1000 * (5 if X.shape[0] < 100000 else 2)) if self.low_memory else (30 if X.shape[0] > 100000 else 30)
+            self.ss = (X.shape[0]//1000 * (3 if X.shape[0] < 100000 else 2)) if self.low_memory else (30 if X.shape[0] > 100000 else 30)
         self.max_its = self.ss * self.non_so_rate
 
         min_batch = 1000
@@ -180,14 +180,16 @@ class SONG(BaseEstimator):
         sratios = ((soeds) * 1. / (self.ss - 1))
         batch_sizes = (X.shape[0] - min_batch) * (sratios * 0 if self.low_memory else sratios ** (np.log10(X.shape[0])) ) + min_batch
         epsilon = self.epsilon
-        lr_sigma = np.float32(np.log10(X.shape[0]) / 2.)
+        lr_sigma = np.float32(5)
         drifters = np.array([])
+        order = self.random_state.permutation(X.shape[0])
+
         for i in range(self.max_its):
-            order = self.random_state.permutation(X.shape[0])
+            order = self.random_state.permutation(X.shape[0]) if not sparse else order
             if not i % self.non_so_rate:
-                presented_len = int(batch_sizes[soed])
+                presented_len = int(batch_sizes[soed])# if not soed == self.ss - 1 else X.shape[0]
                 soed += 1
-            X_presented = X[order[:presented_len]]
+            X_presented = X[order[:presented_len]] if not sparse else X[order[soed*min_batch % X.shape[0]:(soed+1)*min_batch % X.shape[0]]].astype(np.float32)
             if not i % self.non_so_rate:
                 non_growing_iter = 0
                 shp = np.arange(G.shape[0]).astype(np.int32)

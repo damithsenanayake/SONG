@@ -286,14 +286,14 @@ def bulk_grow_sans_drifters(shp, E_q, thresh_g, G, W, Y):
                 G[closests][:, b] = 0
                 E_q[closests] = 0.5
 
-    if np.any(W.sum(axis=1) == 0):
-        raise Exception('zero vector found')
+    # if np.any(W.sum(axis=1) == 0):
+    #     raise Exception('zero vector found')
     return W, G, Y, E_q
 
 
 @numba.njit('f4(f4, f4)', fastmath=True)
 def get_so_rate(tau, sigma):
-    return  np.exp(-sigma * tau)
+    return  np.exp(-sigma * tau ** 2)
 
 @numba.njit(fastmath=True, )
 def train_for_batch_online(X_presented, i, max_its, lrst, lrdec, im_neix, W, max_epochs_per_sample, G, epsilon, min_strength,
