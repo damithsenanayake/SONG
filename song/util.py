@@ -85,7 +85,7 @@ def sq_eucl_opt(A, B):
 
     return C
 
-# @numba.njit(fastmath=True)
+@numba.njit(fastmath=True)
 def get_closest_for_inputs(X, W):
     min_dist_args = np.zeros(X.shape[0], dtype=np.int64)#
     batch_len = 5000
@@ -94,11 +94,10 @@ def get_closest_for_inputs(X, W):
 
         pdists = sq_eucl_opt(X[b * batch_len : (b+1) * batch_len], W)
 
-        min_dist_args[b*batch_len: (b+1) * batch_len] = pdists.argmin(axis=1)
+        for i in range(pdists.shape[0]):
 
-    # for i in range(len(X)):
-    #     dists, neis = distances_and_neighbors(X[i], W, np.int32(1))
-    #     min_dist_args[i] = neis[0]
+            min_dist_args[b*batch_len + i] = pdists[i].argmin()
+
     return min_dist_args
 
 
@@ -329,7 +328,7 @@ def train_for_batch_online(X_presented, i, max_its, lrst, lrdec, im_neix, W, max
                                              Y, ns_rate, alpha, beta,
                                              lr, rng_state, epoch_vector.astype(np.int32),
                                              neg_epoch_vector.astype(np.int32))
-        E_q[b] += dist_H[b]
+        E_q[b] += dist_H[b]/denom
 
     return W, Y, G, E_q
 @numba.njit('i4[:](f4[:], i8)')
@@ -392,7 +391,7 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
                                              Y, ns_rate, alpha, beta,
                                              lrs[k], rng_state, epoch_vector.astype(np.int32),
                                              neg_epoch_vector.astype(np.int32))
-        E_q[b] += dist_H[b]
+        E_q[b] += dist_H[b]/denom
 
     return W, Y, G, E_q
 
@@ -435,7 +434,7 @@ def train_for_input(x, X_presented, i, k, max_its, lrst, lrdec, im_neix, W, max_
                                          Y, ns_rate, alpha, beta,
                                          lr, rng_state, epoch_vector.astype(np.int32),
                                          neg_epoch_vector.astype(np.int32))
-    E_q[b] += dist_H[b]
+    E_q[b] += dist_H[b]/denom
 
     return W, Y, G, E_q, k, b, neilist, neighbors, lr
 

@@ -1,7 +1,5 @@
 import numpy as np
-import scipy as sp
-from sklearn.metrics import pairwise_distances_argmin
-from scipy.sparse import issparse, csr_matrix
+from scipy.sparse import issparse
 from sklearn.base import BaseEstimator
 
 from song.util import find_spread_tightness, \
@@ -14,14 +12,14 @@ INT32_MAX = np.iinfo(np.int32).max - 1
 
 class SONG(BaseEstimator):
 
-    def __init__(self, n_components=2, n_neighbors=3,
+    def __init__(self, n_components=2, n_neighbors=1,
                  lr=1., gamma=None, so_steps = None,
                  spread_factor=0.9,
-                 spread=1., min_dist=0.1, ns_rate=10,
+                 spread=1., min_dist=0.1, ns_rate=5,
                  agility=1., verbose=0,
                  max_age=3,
-                 random_seed=1, epsilon=1e-10, a=None, b=None, final_vector_count=None, coincidence_dispersion=0.,
-                 online_portion=0.8, fvc_growth=0.5, non_so_rate = 5, low_memory = False):
+                 random_seed=1, epsilon=.9, a=None, b=None, final_vector_count=None, coincidence_dispersion=0.,
+                 online_portion=.0, fvc_growth=0.5, non_so_rate = 0, low_memory = False):
 
         ''' Initialize a SONG to reduce data.
 
@@ -98,7 +96,7 @@ class SONG(BaseEstimator):
         self.fast_portion = online_portion
         self.min_strength = epsilon ** ((self.dim + self.max_age))
         self.ss = so_steps
-        self.non_so_rate = non_so_rate
+        self.non_so_rate = non_so_rate + 1
         self.prot_inc_portion = fvc_growth
         self.low_memory = low_memory
         self.trained = False
@@ -116,9 +114,8 @@ class SONG(BaseEstimator):
         min_dist = self.min_dist
         spread = self.spread
 
-        self.low_memory = self.low_memory or sparse # Treat sparse as low-memory setting
         if self.ss is None:
-            self.ss = (X.shape[0]//1000 * (3 if X.shape[0] < 100000 else 2)) if self.low_memory else (30 if X.shape[0] > 100000 else 30)
+            self.ss = (X.shape[0]//1000 * (3 if X.shape[0] < 100000 else 2)) if self.low_memory else (30 if X.shape[0] > 100000 else 200)
         self.max_its = self.ss * self.non_so_rate
 
         min_batch = 1000
@@ -128,7 +125,7 @@ class SONG(BaseEstimator):
             alpha = self.alpha
             beta = self.beta
 
-        scale = np.median(np.linalg.norm(X-X.mean(axis=0), axis=1) if not sparse else sp.sparse.linalg.norm(csr_matrix(X), axis=1)) ** 2.
+        scale = 1.#np.median(np.linalg.norm(X-X.mean(axis=0), axis=1) if not sparse else sp.sparse.linalg.norm(csr_matrix(X), axis=1)) ** 2.
 
         if self.sf is None:
             self.sf = np.log(4) / (2 * self.ss)
@@ -173,12 +170,8 @@ class SONG(BaseEstimator):
 
         lrst = self.lrst
 
-        presented_len = X.shape[0]
         soed = 0
         lrdec = 1.
-        soeds = np.arange(self.ss)
-        sratios = ((soeds) * 1. / (self.ss - 1))
-        batch_sizes = (X.shape[0] - min_batch) * (sratios * 0 if self.low_memory else sratios ** (np.log10(X.shape[0])) ) + min_batch
         epsilon = self.epsilon
         lr_sigma = np.float32(5)
         drifters = np.array([])
@@ -187,9 +180,8 @@ class SONG(BaseEstimator):
         for i in range(self.max_its):
             order = self.random_state.permutation(X.shape[0]) if not sparse else order
             if not i % self.non_so_rate:
-                presented_len = int(batch_sizes[soed])# if not soed == self.ss - 1 else X.shape[0]
                 soed += 1
-            X_presented = X[order[:presented_len]] if not sparse else X[order[soed*min_batch % X.shape[0]:(soed+1)*min_batch % X.shape[0]]].astype(np.float32)
+            X_presented = X[order[soed*min_batch % X.shape[0]:(soed+1)*min_batch % X.shape[0]]].astype(np.float32)
             if not i % self.non_so_rate:
                 non_growing_iter = 0
                 shp = np.arange(G.shape[0]).astype(np.int32)
@@ -209,51 +201,39 @@ class SONG(BaseEstimator):
                 if verbose:
                     print(
                         '\r Training with SO epoch {} / {} , |X| = {} , |G| = {}  '.format(
-                            i + 1, self.max_its, presented_len, G.shape[0]), end='')
-                if ((i * 1. / self.max_its < self.fast_portion) or X.shape[0] < 10000) and not sparse:
+                            i + 1, self.max_its, X_presented.shape[0], G.shape[0]), end='')
 
+                if ((i * 1. / self.max_its < self.fast_portion) or X.shape[0] < 10000) and not sparse:
+                    '''ONLINE TRAINING for small datasets '''
                     W, Y, G, E_q = train_for_batch_online(X_presented, i, self.max_its, lrst, lrdec, im_neix, W,
                                                           self.max_epochs_per_sample, G, epsilon, self.min_strength,
                                                           shp, Y,
                                                           self.ns_rate, alpha, beta, self.rng_state, E_q, lr_sigma,
                                                           self.reduced_lr)
-
                 else:
-                    # too_big = False
-                    if not self.low_memory and not sparse:
+                    '''BATCH TRAINING for large and sparse datasets'''
 
-                        pdists = sq_eucl_opt(X_presented, W).astype(np.float32)
-                        W, Y, G, E_q = train_for_batch_batch(X_presented, pdists, i, self.max_its, lrst, lrdec, im_neix,
+                    chunk_size =  1000
+                    n_chunks = X_presented.shape[0]//chunk_size + 1
+
+                    for chunk in range(n_chunks):
+                        chunk_st = chunk * chunk_size
+                        chunk_en = chunk_st + chunk_size
+                        X_chunk = X_presented[chunk_st:chunk_en].toarray() if sparse else X_presented[chunk_st:chunk_en]
+                        pdists = sq_eucl_opt(X_chunk, W).astype(np.float32)
+                        W, Y, G, E_q = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, lrdec, im_neix,
                                                              W,
-                                                             self.max_epochs_per_sample, G, epsilon, self.min_strength,
+                                                             self.max_epochs_per_sample, G, epsilon,
+                                                             self.min_strength,
                                                              shp, Y,
-                                                             self.ns_rate, alpha, beta, self.rng_state, E_q, lr_sigma,
-                                                             self.reduced_lr)
-
-                    else:
-                        chunk_size = 10000 if not sparse else 1000
-                        chunks = X_presented.shape[0] // chunk_size
-
-                        for chunk in range(chunks + 1):
-                            chunk_st = chunk * chunk_size
-                            chunk_en = chunk_st + chunk_size
-                            X_chunk = X_presented[chunk_st:chunk_en]
-                            if sparse:
-                                X_chunk = X_chunk.todense()
-
-                            pdists = sq_eucl_opt(X_chunk, W).astype(np.float32)
-                            W, Y, G, E_q = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, lrdec, im_neix,
-                                                                 W,
-                                                                 self.max_epochs_per_sample, G, epsilon,
-                                                                 self.min_strength,
-                                                                 shp, Y,
-                                                                 self.ns_rate, alpha, beta, self.rng_state, E_q,
-                                                                 lr_sigma, self.reduced_lr)
+                                                             self.ns_rate, alpha, beta, self.rng_state, E_q,
+                                                             lr_sigma, self.reduced_lr)
 
                 drifters = np.where(G.sum(axis=1) == 0)[0]
+
             else:
                 if verbose:
-                    print('\r Training sans SO epoch {} / {} , |X| = {} , |G| = {}  '.format(i + 1, self.max_its, presented_len, G.shape[0]), end='')
+                    print('\r Training sans SO epoch {} / {} , |X| = {} , |G| = {}  '.format(i + 1, self.max_its, X_presented.shape[0], G.shape[0]), end='')
 
                 repeats = 1 if not soed == self.ss else 1
                 for repeat in range(repeats):
@@ -279,6 +259,7 @@ class SONG(BaseEstimator):
         return self.transform(X)
 
     def transform(self, X):
+
         if not issparse(X):
             min_dist_args = get_closest_for_inputs(np.float32(X), self.W)
         else:
@@ -287,30 +268,25 @@ class SONG(BaseEstimator):
             chunk = 1000
 
             for i in range(X.shape[0]//chunk + 1):
-                X_b = X[i * chunk : (i+1) * chunk].todense()
+                X_b = X[i * chunk : (i+1) * chunk].toarray()
                 min_dist_args.extend(list(get_closest_for_inputs(np.float32(X_b), self.W)))
 
         output = self.Y[min_dist_args]
-        return output + 0 if self.dispersion == 0 else self.add_dispersion(min_dist_args)
+        return output
 
-    def add_dispersion(self, min_dist_args):
 
-        closest_dists = [np.sort(np.linalg.norm(self.Y[min_dist_args[i]] - self.Y, axis=1))[1] for i in
-                         range(len(min_dist_args))]
-
-        jitter = self.random_state.random(self.Y[min_dist_args].shape)
-        jitter -= 0.5
-
-        jitter /= np.linalg.norm(jitter, axis=1).reshape((jitter.shape[0], 1))
-        jitter *= 2
-
-        jitter_rad = self.random_state.random((jitter.shape[0], 1))
-        jitter *= jitter_rad
-
-        noise = np.array(closest_dists).reshape((len(min_dist_args), 1)) * 0.5 * jitter * self.dispersion
-
-        return noise
 
     def get_representatives(self, X):
-        min_dist_args = pairwise_distances_argmin(X, self.W)
+
+        if not issparse(X):
+            min_dist_args = get_closest_for_inputs(np.float32(X), self.W)
+        else:
+            min_dist_args = []
+
+            chunk = 1000
+
+            for i in range(X.shape[0]//chunk + 1):
+                X_b = X[i * chunk : (i+1) * chunk].toarray()
+                min_dist_args.extend(list(get_closest_for_inputs(np.float32(X_b), self.W)))
+
         return min_dist_args
