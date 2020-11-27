@@ -18,7 +18,7 @@ class SONG(BaseEstimator):
                  spread=1., min_dist=0.1, ns_rate=5,
                  agility=1., verbose=0,
                  max_age=3,
-                 random_seed=1, epsilon=.9, a=None, b=None, final_vector_count=None, coincidence_dispersion=0.,
+                 random_seed=1, epsilon=0.1, a=None, b=None, final_vector_count=None, coincidence_dispersion=0.,
                  online_portion=.0, fvc_growth=0.5, non_so_rate = 0, low_memory = False):
 
         ''' Initialize a SONG to reduce data.

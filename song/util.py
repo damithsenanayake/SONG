@@ -391,7 +391,7 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
                                              Y, ns_rate, alpha, beta,
                                              lrs[k], rng_state, epoch_vector.astype(np.int32),
                                              neg_epoch_vector.astype(np.int32))
-        E_q[b] += dist_H[b]/denom
+        E_q[b] += dist_H[b]#/denom
 
     return W, Y, G, E_q
 
@@ -434,7 +434,7 @@ def train_for_input(x, X_presented, i, k, max_its, lrst, lrdec, im_neix, W, max_
                                          Y, ns_rate, alpha, beta,
                                          lr, rng_state, epoch_vector.astype(np.int32),
                                          neg_epoch_vector.astype(np.int32))
-    E_q[b] += dist_H[b]/denom
+    E_q[b] += dist_H[b]#/denom
 
     return W, Y, G, E_q, k, b, neilist, neighbors, lr
 
