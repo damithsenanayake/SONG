@@ -1,5 +1,7 @@
 import numpy as np
-from scipy.sparse import issparse
+from umap import UMAP
+from sklearn.decomposition import PCA
+from scipy.sparse import issparse, csr_matrix
 from sklearn.base import BaseEstimator
 
 from song.util import find_spread_tightness, \
@@ -14,11 +16,11 @@ class SONG(BaseEstimator):
 
     def __init__(self, n_components=2, n_neighbors=1,
                  lr=1., gamma=None, so_steps = None,
-                 spread_factor=0.9,
+                 spread_factor=0.6,
                  spread=1., min_dist=0.1, ns_rate=5,
                  agility=1., verbose=0,
                  max_age=3,
-                 random_seed=1, epsilon=0.1, a=None, b=None, final_vector_count=None, coincidence_dispersion=0.,
+                 random_seed=1, epsilon=.9, a=None, b=None, final_vector_count=None, dispersion_method = None,
                  online_portion=.0, fvc_growth=0.5, non_so_rate = 0, low_memory = False):
 
         ''' Initialize a SONG to reduce data.
@@ -92,7 +94,6 @@ class SONG(BaseEstimator):
         self.max_age = max_age
         self.reduced_lr = 1.
         self.prototypes = None
-        self.dispersion = coincidence_dispersion
         self.fast_portion = online_portion
         self.min_strength = epsilon ** ((self.dim + self.max_age))
         self.ss = so_steps
@@ -100,6 +101,8 @@ class SONG(BaseEstimator):
         self.prot_inc_portion = fvc_growth
         self.low_memory = low_memory
         self.trained = False
+        self.dispersion_method = dispersion_method
+
 
     def fit(self, X):
         '''
@@ -125,10 +128,7 @@ class SONG(BaseEstimator):
             alpha = self.alpha
             beta = self.beta
 
-        scale_sample = X[self.random_state.permutation(X.shape[0])[:2000]]
-        if sparse:
-            scale_sample = scale_sample.toarray()
-        scale = np.median(np.linalg.norm(scale_sample-X.mean(axis=0), axis=1))
+        scale = 1.#np.median(np.linalg.norm(X-X.mean(axis=0), axis=1) if not sparse else sp.sparse.linalg.norm(csr_matrix(X), axis=1)) ** 2.
 
         if self.sf is None:
             self.sf = np.log(4) / (2 * self.ss)
@@ -173,18 +173,25 @@ class SONG(BaseEstimator):
 
         lrst = self.lrst
 
+        presented_len = X.shape[0]
         soed = 0
         lrdec = 1.
+        soeds = np.arange(self.ss)
+        sratios = ((soeds) * 1. / (self.ss - 1))
+
+        batch_sizes = (X.shape[0] - min_batch) * ((sratios * 0) if self.low_memory else sratios ** (10) ) + min_batch
         epsilon = self.epsilon
         lr_sigma = np.float32(5)
         drifters = np.array([])
         order = self.random_state.permutation(X.shape[0])
 
         for i in range(self.max_its):
-            order = self.random_state.permutation(X.shape[0]) if not sparse else order
+
+            order = self.random_state.permutation(X.shape[0]) #if not sparse else order
             if not i % self.non_so_rate:
+                presented_len = int(batch_sizes[soed])# if not soed == self.ss - 1 else X.shape[0]
                 soed += 1
-            X_presented = X[order[soed*min_batch % X.shape[0]:(soed+1)*min_batch % X.shape[0]]].astype(np.float32)
+            X_presented = X[order[:presented_len]] #if not sparse else X[order[soed*min_batch % X.shape[0]:(soed+1)*min_batch % X.shape[0]]].astype(np.float32)
             if not i % self.non_so_rate:
                 non_growing_iter = 0
                 shp = np.arange(G.shape[0]).astype(np.int32)
@@ -243,6 +250,9 @@ class SONG(BaseEstimator):
                     Y = embed_batch_epochs(Y, G, self.max_its, i, alpha, beta, self.rng_state, self.reduced_lr)
                 non_growing_iter += 1
 
+            ''' This step is needed to synchronize with UMAP dispersion'''
+            Y = 10 * (Y - Y.min(axis=0)) / (Y.max(axis=0) - Y.min(axis=0))
+
         self.reduced_lr = self.reduced_lr * self.agility
         self.W = W
         self.Y = Y
@@ -275,6 +285,16 @@ class SONG(BaseEstimator):
                 min_dist_args.extend(list(get_closest_for_inputs(np.float32(X_b), self.W)))
 
         output = self.Y[min_dist_args]
+
+        if self.dispersion_method == 'UMAP':
+            disp_model = UMAP(learning_rate=0.001, n_epochs=11, init=output)
+            X_pc = PCA(n_components=50).fit_transform(X)
+            if self.verbose:
+                print('\nDispersing output using UMAP...')
+            output = disp_model.fit_transform(X_pc)
+            if self.verbose:
+                print('\nUMAP dispersion finished!')
+
         return output
 
 
