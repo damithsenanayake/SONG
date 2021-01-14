@@ -21,7 +21,7 @@ class SONG(BaseEstimator):
                  agility=1., verbose=0,
                  max_age=3,
                  random_seed=1, epsilon=.9, a=None, b=None, final_vector_count=None, dispersion_method = None,
-                 online_portion=.0, fvc_growth=0.5, non_so_rate = 0, low_memory = False):
+                 online_portion=.0, fvc_growth=0.5, non_so_rate = 0, low_memory = False, um_min_dist = 0.001, um_lr = 0.01, um_epochs = 11):
 
         ''' Initialize a SONG to reduce data.
 
@@ -102,6 +102,9 @@ class SONG(BaseEstimator):
         self.low_memory = low_memory
         self.trained = False
         self.dispersion_method = dispersion_method
+        self.um_lr = um_lr
+        self.um_epochs = um_epochs
+        self.um_min_dist = um_min_dist
 
 
     def fit(self, X):
@@ -250,8 +253,7 @@ class SONG(BaseEstimator):
                     Y = embed_batch_epochs(Y, G, self.max_its, i, alpha, beta, self.rng_state, self.reduced_lr)
                 non_growing_iter += 1
 
-            ''' This step is needed to synchronize with UMAP dispersion'''
-            Y = 10 * (Y - Y.min(axis=0)) / (Y.max(axis=0) - Y.min(axis=0))
+
 
         self.reduced_lr = self.reduced_lr * self.agility
         self.W = W
@@ -285,13 +287,16 @@ class SONG(BaseEstimator):
                 min_dist_args.extend(list(get_closest_for_inputs(np.float32(X_b), self.W)))
 
         output = self.Y[min_dist_args]
-
+        Y = output.copy()
         if self.dispersion_method == 'UMAP':
-            disp_model = UMAP(learning_rate=0.001, n_epochs=11, init=output)
-            X_pc = PCA(n_components=50).fit_transform(X)
+            ''' This step is needed to synchronize with UMAP dispersion'''
+            Y_init = 10 * (Y - Y.min(axis=0)) / (Y.max(axis=0) - Y.min(axis=0))
+            disp_model = UMAP(learning_rate=self.um_lr, n_epochs=self.um_epochs, init=Y_init, min_dist=self.um_min_dist)
+            X_pc = PCA(n_components=np.min([50, X.shape[0], X.shape[1]])).fit_transform(X)
             if self.verbose:
                 print('\nDispersing output using UMAP...')
             output = disp_model.fit_transform(X_pc)
+            output = ((output) * (Y.max(axis=0) - Y.min(axis=0)) / 10.) + Y.min(axis=0)
             if self.verbose:
                 print('\nUMAP dispersion finished!')
 
