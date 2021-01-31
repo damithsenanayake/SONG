@@ -2,6 +2,7 @@ import numpy as np
 from umap import UMAP
 from sklearn.decomposition import PCA
 from scipy.sparse import issparse, csr_matrix
+import scipy as sp
 from sklearn.base import BaseEstimator
 
 from song.util import find_spread_tightness, \
@@ -121,7 +122,7 @@ class SONG(BaseEstimator):
         spread = self.spread
 
         if self.ss is None:
-            self.ss = (X.shape[0]//1000 * (3 if X.shape[0] < 100000 else 2)) if self.low_memory else (30 if X.shape[0] > 100000 else 200)
+            self.ss = (X.shape[0]//1000 * (3 if X.shape[0] < 100000 else 2)) if self.low_memory else (30 if X.shape[0] > 100000 else 50)
         self.max_its = self.ss * self.non_so_rate
 
         min_batch = 1000
@@ -131,7 +132,14 @@ class SONG(BaseEstimator):
             alpha = self.alpha
             beta = self.beta
 
-        scale = 1.#np.median(np.linalg.norm(X-X.mean(axis=0), axis=1) if not sparse else sp.sparse.linalg.norm(csr_matrix(X), axis=1)) ** 2.
+        if not sparse:
+            scale = np.median(np.linalg.norm(X-X.mean(axis=0), axis=1))**2
+        else:
+            scale = np.median(sp.sparse.linalg.norm(csr_matrix(X[self.random_state.permutation(X.shape[0])[:1000]] - X.mean(axis=0)), axis=1))**2
+            #if not sparse else sp.sparse.linalg.norm(csr_matrix(X), axis=1)) ** 2.
+
+        if verbose:
+            print(f'scaling factor for growth threshold: {scale}')
 
         if self.sf is None:
             self.sf = np.log(4) / (2 * self.ss)
@@ -186,7 +194,6 @@ class SONG(BaseEstimator):
         epsilon = self.epsilon
         lr_sigma = np.float32(5)
         drifters = np.array([])
-        order = self.random_state.permutation(X.shape[0])
 
         for i in range(self.max_its):
 
