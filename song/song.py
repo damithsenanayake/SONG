@@ -200,14 +200,14 @@ class SONG(BaseEstimator):
         epsilon = self.epsilon
         lr_sigma = np.float32(5)
         drifters = np.array([])
-
+        order = self.random_state.permutation(X.shape[0])
         for i in range(self.max_its):
 
             order = self.random_state.permutation(X.shape[0]) if not self.sampled_batches else order
             if not i % self.non_so_rate:
                 presented_len = int(batch_sizes[soed]) if not self.sampled_batches else 1000
                 soed += 1
-            X_presented = X[order[:presented_len]] if not self.sampled_batches else X[presented_len * i : presented_len * (i+1)].astype(np.float32)
+            X_presented = X[order[:presented_len]] if not self.sampled_batches else X[(presented_len * i)%X.shape[0] : min((presented_len * i)%X.shape[0]+presented_len, X.shape[0])].astype(np.float32)
             if not i % self.non_so_rate:
                 non_growing_iter = 0
                 shp = np.arange(G.shape[0]).astype(np.int32)
@@ -248,7 +248,7 @@ class SONG(BaseEstimator):
                         X_chunk = X_presented[chunk_st:chunk_en].toarray() if sparse else X_presented[chunk_st:chunk_en]
                         pdists = sq_eucl_opt(X_chunk, W).astype(np.float32)
                         if verbose:
-                            print(f'\r Training chunk {chunk + 1} of {n_chunks}', end='')
+                            print(f'\r |G| = {G.shape[0]}, |X| = {X.shape[0]}, Training chunk {chunk + 1} of {n_chunks}', end='')
                         W, Y, G, E_q = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, lrdec, im_neix,
                                                              W,
                                                              self.max_epochs_per_sample, G, epsilon,
