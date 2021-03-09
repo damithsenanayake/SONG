@@ -22,7 +22,7 @@ class SONG(BaseEstimator):
                  agility=1., verbose=0,
                  max_age=3,
                  random_seed=1, epsilon=.9, a=None, b=None, final_vector_count=None, dispersion_method = None,
-                 online_portion=.0, fvc_growth=0.5, non_so_rate = 0, low_memory = False, um_min_dist = 0.001, um_lr = 0.01, um_epochs = 11):
+                 online_portion=.0, fvc_growth=0.5, chunk_size = 1000, non_so_rate = 0, low_memory = False, sampled_batches = None, um_min_dist = 0.001, um_lr = 0.01, um_epochs = 11):
 
         ''' Initialize a SONG to reduce data.
 
@@ -106,6 +106,12 @@ class SONG(BaseEstimator):
         self.um_lr = um_lr
         self.um_epochs = um_epochs
         self.um_min_dist = um_min_dist
+        self.chunk_size = chunk_size
+
+        if not sampled_batches is None:
+            self.sampled_batches = sampled_batches
+        else:
+            self.sampled_batches = low_memory
 
 
     def fit(self, X):
@@ -197,11 +203,11 @@ class SONG(BaseEstimator):
 
         for i in range(self.max_its):
 
-            order = self.random_state.permutation(X.shape[0]) #if not sparse else order
+            order = self.random_state.permutation(X.shape[0]) if not self.sampled_batches else order
             if not i % self.non_so_rate:
-                presented_len = int(batch_sizes[soed])# if not soed == self.ss - 1 else X.shape[0]
+                presented_len = int(batch_sizes[soed]) if not self.sampled_batches else 1000
                 soed += 1
-            X_presented = X[order[:presented_len]] #if not sparse else X[order[soed*min_batch % X.shape[0]:(soed+1)*min_batch % X.shape[0]]].astype(np.float32)
+            X_presented = X[order[:presented_len]] if not self.sampled_batches else X[presented_len * i : presented_len * (i+1)].astype(np.float32)
             if not i % self.non_so_rate:
                 non_growing_iter = 0
                 shp = np.arange(G.shape[0]).astype(np.int32)
@@ -233,7 +239,7 @@ class SONG(BaseEstimator):
                 else:
                     '''BATCH TRAINING for large and sparse datasets'''
 
-                    chunk_size =  1000
+                    chunk_size =  self.chunk_size
                     n_chunks = X_presented.shape[0]//chunk_size + 1
 
                     for chunk in range(n_chunks):
@@ -241,6 +247,8 @@ class SONG(BaseEstimator):
                         chunk_en = chunk_st + chunk_size
                         X_chunk = X_presented[chunk_st:chunk_en].toarray() if sparse else X_presented[chunk_st:chunk_en]
                         pdists = sq_eucl_opt(X_chunk, W).astype(np.float32)
+                        if verbose:
+                            print(f'\r Training chunk {chunk + 1} of {n_chunks}', end='')
                         W, Y, G, E_q = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, lrdec, im_neix,
                                                              W,
                                                              self.max_epochs_per_sample, G, epsilon,
