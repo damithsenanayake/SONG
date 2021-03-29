@@ -1,6 +1,6 @@
 import numpy as np
 from umap import UMAP
-from sklearn.decomposition import PCA
+from sklearn.decomposition import PCA, TruncatedSVD
 from scipy.sparse import issparse, csr_matrix
 import scipy as sp
 from sklearn.base import BaseEstimator
@@ -289,7 +289,8 @@ class SONG(BaseEstimator):
         return self.transform(X)
 
     def transform(self, X):
-
+        if len(X.shape) == 1:
+            X = np.array([X])
         if not issparse(X):
             min_dist_args = get_closest_for_inputs(np.float32(X), self.W)
         else:
@@ -305,13 +306,26 @@ class SONG(BaseEstimator):
         Y = output.copy()
         if self.dispersion_method == 'UMAP':
             ''' This step is needed to synchronize with UMAP dispersion'''
-            Y_init = 10 * (Y - Y.min(axis=0)) / (Y.max(axis=0) - Y.min(axis=0))
-            disp_model = UMAP(learning_rate=self.um_lr, n_epochs=self.um_epochs, init=Y_init, min_dist=self.um_min_dist)
-            X_pc = PCA(n_components=np.min([50, X.shape[0], X.shape[1]])).fit_transform(X)
-            if self.verbose:
-                print('\nDispersing output using UMAP...')
-            output = disp_model.fit_transform(X_pc)
-            output = ((output) * (Y.max(axis=0) - Y.min(axis=0)) / 10.) + Y.min(axis=0)
+            if not hasattr(self, 'Y_loc'):
+                self.Y_loc = Y.min(axis=0)
+                self.Y_scale = Y.max(axis=0) - Y.min(axis=0)
+            Y_init = 10 * (Y - self.Y_loc / self.Y_scale)
+            if Y.shape[0] == 1:
+                if self.disp_model == None:
+                    raise ValueError('Please ensure that your input is larger than 1 vector')
+                else:
+                    x_pc = self.pca.transform(X)
+                    output = self.disp_model.fit_transform(x_pc)
+                    output = ((output) * (Y.max(axis=0) - Y.min(axis=0)) / 10.) + Y.min(axis=0)
+
+            else:
+                self.disp_model = UMAP(learning_rate=self.um_lr, n_epochs=self.um_epochs, init=Y_init, min_dist=self.um_min_dist)
+                self.pca = PCA(n_components=np.min([50, X.shape[0], X.shape[1]])) if not issparse(X) else TruncatedSVD(n_components=np.min([50, X.shape[0], X.shape[1]]))
+                X_pc = self.pca.fit_transform(X)
+                if self.verbose:
+                    print('\nDispersing output using UMAP...')
+                output = self.disp_model.fit_transform(X_pc)
+                output = ((output) * (self.Y_scale) / 10.) + self.Y_loc
             if self.verbose:
                 print('\nUMAP dispersion finished!')
 
