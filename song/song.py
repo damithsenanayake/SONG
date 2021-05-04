@@ -306,17 +306,16 @@ class SONG(BaseEstimator):
         Y = output.copy()
         if self.dispersion_method == 'UMAP':
             ''' This step is needed to synchronize with UMAP dispersion'''
-            if not hasattr(self, 'Y_loc'):
-                self.Y_loc = Y.min(axis=0)
-                self.Y_scale = Y.max(axis=0) - Y.min(axis=0)
-            Y_init = 10 * (Y - self.Y_loc / self.Y_scale)
+            self.Y_loc = Y.min(axis=0)
+            self.Y_scale = Y.max(axis=0) - Y.min(axis=0)
+            Y_init = 10 * (Y - self.Y_loc) / self.Y_scale
             if Y.shape[0] == 1:
                 if self.disp_model == None:
                     raise ValueError('Please ensure that your input is larger than 1 vector')
                 else:
                     x_pc = self.pca.transform(X)
                     output = self.disp_model.fit_transform(x_pc)
-                    output = ((output) * (Y.max(axis=0) - Y.min(axis=0)) / 10.) + Y.min(axis=0)
+                    output = ((output) * (self.Y_scale) / 10.) + self.Y_loc
 
             else:
                 self.disp_model = UMAP(learning_rate=self.um_lr, n_epochs=self.um_epochs, init=Y_init, min_dist=self.um_min_dist)
