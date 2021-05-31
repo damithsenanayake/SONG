@@ -288,12 +288,31 @@ class SONG(BaseEstimator):
         self.fit(X)
         return self.transform(X)
 
-    def transform(self, X):
-        if len(X.shape) == 1:
-            X = np.array([X])
-        if not issparse(X):
-            min_dist_args = get_closest_for_inputs(np.float32(X), self.W)
+    def transform(self, X, reduction = 'PCA'):
+
+        '''Adding a PCA-reduction to speed up the transform process'''
+
+
+        if reduction == 'PCA':
+            self.pca = PCA(n_components=np.min([50, X.shape[0], X.shape[1]]) - 1) if not issparse(X) else TruncatedSVD(
+                n_components=np.min([50, X.shape[0], X.shape[1]]))
+            self.pca.fit(X)
+            W_pc = self.pca.transform(self.W).astype(np.float32)
+            X_pc = self.pca.transform(X).astype(np.float32)
+
+            if len(X_pc.shape) == 1:
+                X_pc = np.array([X_pc])
+
+            min_dist_args = []
+            chunk = 1000
+
+            for i in range(X.shape[0] // chunk + 1):
+                X_b = X_pc[i * chunk: (i + 1) * chunk]
+                min_dist_args.extend(list(get_closest_for_inputs(np.float32(X_b), W_pc)))
         else:
+            if len(X.shape) == 1:
+                X = np.array([X])
+
             min_dist_args = []
 
             chunk = 1000
@@ -319,7 +338,6 @@ class SONG(BaseEstimator):
 
             else:
                 self.disp_model = UMAP(learning_rate=self.um_lr, n_epochs=self.um_epochs, init=Y_init, min_dist=self.um_min_dist)
-                self.pca = PCA(n_components=np.min([50, X.shape[0], X.shape[1]])) if not issparse(X) else TruncatedSVD(n_components=np.min([50, X.shape[0], X.shape[1]]))
                 X_pc = self.pca.fit_transform(X)
                 if self.verbose:
                     print('\nDispersing output using UMAP...')
