@@ -1,4 +1,5 @@
 import numpy as np
+
 from umap import UMAP
 from sklearn.decomposition import PCA, TruncatedSVD
 from scipy.sparse import issparse, csr_matrix
@@ -15,8 +16,8 @@ INT32_MAX = np.iinfo(np.int32).max - 1
 
 class SONG(BaseEstimator):
 
-    def __init__(self, n_components=2, n_neighbors=1,
-                 lr=.1, gamma=None, so_steps = None,
+    def __init__(self, n_components=2, n_neighbors=2,
+                 lr=1., gamma=None, so_steps = None,
                  spread_factor=0.6,
                  spread=1., min_dist=0.1, ns_rate=5,
                  agility=1., verbose=0,
@@ -121,19 +122,17 @@ class SONG(BaseEstimator):
         same order
         :return: Y : The Mapped Coordinates in the desired output space (default = 2 ).
         '''
+
         verbose = self.verbose
         sparse = issparse(X)
         min_dist = self.min_dist
         spread = self.spread
-        min_batch = 1000
-        self.sampled_batches = X.shape[0] > 50000 and X.shape[1] > 200
+
         if self.ss is None:
-            if self.sampled_batches:
-                self.ss = np.int32(1.5 *(X.shape[0] // min_batch))
-            else:
-                self.ss = (X.shape[0]//1000 * (3 if X.shape[0] < 100000 else 2)) if self.low_memory else (30 if X.shape[0] > 100000 else 50)
+            self.ss = (X.shape[0]//1000 * (3 if X.shape[0] < 100000 else 2)) if self.low_memory else (30 if X.shape[0] > 100000 else 50)
         self.max_its = self.ss * self.non_so_rate
 
+        min_batch = 1000
         if self.alpha is None and self.beta is None:
             alpha, beta = find_spread_tightness(spread, min_dist)
         else:
@@ -205,11 +204,11 @@ class SONG(BaseEstimator):
         order = self.random_state.permutation(X.shape[0])
         for i in range(self.max_its):
 
-            order = self.random_state.permutation(X.shape[0]) if not (self.sampled_batches or soed > X.shape[0]//min_batch) else order
+            order = self.random_state.permutation(X.shape[0]) if not self.sampled_batches else order
             if not i % self.non_so_rate:
                 presented_len = int(batch_sizes[soed]) if not self.sampled_batches else 1000
                 soed += 1
-            X_presented = X[order[:presented_len]] if not self.sampled_batches else X[max((presented_len * i)%X.shape[0] - 100, 0) : min((presented_len * i)%X.shape[0]+presented_len + 100, X.shape[0])].astype(np.float32)
+            X_presented = X[order[:presented_len]] if not self.sampled_batches else X[(presented_len * i)%X.shape[0] : min((presented_len * i)%X.shape[0]+presented_len, X.shape[0])].astype(np.float32)
             if not i % self.non_so_rate:
                 non_growing_iter = 0
                 shp = np.arange(G.shape[0]).astype(np.int32)
