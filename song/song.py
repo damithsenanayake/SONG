@@ -16,7 +16,7 @@ INT32_MAX = np.iinfo(np.int32).max - 1
 class SONG(BaseEstimator):
 
     def __init__(self, n_components=2, n_neighbors=1,
-                 lr=1., gamma=None, so_steps = None,
+                 lr=.1, gamma=None, so_steps = None,
                  spread_factor=0.6,
                  spread=1., min_dist=0.1, ns_rate=5,
                  agility=1., verbose=0,
@@ -121,17 +121,19 @@ class SONG(BaseEstimator):
         same order
         :return: Y : The Mapped Coordinates in the desired output space (default = 2 ).
         '''
-
         verbose = self.verbose
         sparse = issparse(X)
         min_dist = self.min_dist
         spread = self.spread
-
+        min_batch = 1000
+        self.sampled_batches = X.shape[0] > 50000 and X.shape[1] > 200
         if self.ss is None:
-            self.ss = (X.shape[0]//1000 * (3 if X.shape[0] < 100000 else 2)) if self.low_memory else (30 if X.shape[0] > 100000 else 50)
+            if self.sampled_batches:
+                self.ss = np.int32(1.5 *(X.shape[0] // min_batch))
+            else:
+                self.ss = (X.shape[0]//1000 * (3 if X.shape[0] < 100000 else 2)) if self.low_memory else (30 if X.shape[0] > 100000 else 50)
         self.max_its = self.ss * self.non_so_rate
 
-        min_batch = 1000
         if self.alpha is None and self.beta is None:
             alpha, beta = find_spread_tightness(spread, min_dist)
         else:
@@ -141,7 +143,7 @@ class SONG(BaseEstimator):
         if not sparse:
             scale = np.median(np.linalg.norm(X-X.mean(axis=0), axis=1))**2
         else:
-            scale = np.median(sp.sparse.linalg.norm(csr_matrix(X[self.random_state.permutation(X.shape[0])[:1000]] - X.mean(axis=0)), axis=1))**2
+            scale = np.median(sp.sparse.linalg.norm(csr_matrix(X[self.random_state.permutation(X.shape[0])[:1000]] - X.mean(axis=0)), axis=1))
             #if not sparse else sp.sparse.linalg.norm(csr_matrix(X), axis=1)) ** 2.
 
         if verbose:
@@ -149,7 +151,7 @@ class SONG(BaseEstimator):
 
         if self.sf is None:
             self.sf = np.log(4) / (2 * self.ss)
-        thresh_g = -np.log(X.shape[1]) * np.log(self.sf) * (scale)
+        thresh_g = -np.log(X.shape[1]) * np.log(self.sf) #* (scale)
 
         so_lr_st = self.lrst
         if self.prototypes is None:
@@ -203,11 +205,11 @@ class SONG(BaseEstimator):
         order = self.random_state.permutation(X.shape[0])
         for i in range(self.max_its):
 
-            order = self.random_state.permutation(X.shape[0]) if not self.sampled_batches else order
+            order = self.random_state.permutation(X.shape[0]) if not (self.sampled_batches or soed > X.shape[0]//min_batch) else order
             if not i % self.non_so_rate:
                 presented_len = int(batch_sizes[soed]) if not self.sampled_batches else 1000
                 soed += 1
-            X_presented = X[order[:presented_len]] if not self.sampled_batches else X[(presented_len * i)%X.shape[0] : min((presented_len * i)%X.shape[0]+presented_len, X.shape[0])].astype(np.float32)
+            X_presented = X[order[:presented_len]] if not self.sampled_batches else X[max((presented_len * i)%X.shape[0] - 100, 0) : min((presented_len * i)%X.shape[0]+presented_len + 100, X.shape[0])].astype(np.float32)
             if not i % self.non_so_rate:
                 non_growing_iter = 0
                 shp = np.arange(G.shape[0]).astype(np.int32)
@@ -226,8 +228,7 @@ class SONG(BaseEstimator):
 
                 if verbose:
                     print(
-                        '\r Training with SO epoch {} / {} , |X| = {} , |G| = {}  '.format(
-                            i + 1, self.max_its, X_presented.shape[0], G.shape[0]), end='')
+                        f'\r  |G| = {G.shape[0]}, |X| = {X_presented.shape[0]}, epoch = {i+1}/{self.max_its}, Self-organizing', end='')
 
                 if ((i * 1. / self.max_its < self.fast_portion) or X.shape[0] < 10000) and not sparse:
                     '''ONLINE TRAINING for small datasets '''
@@ -248,7 +249,7 @@ class SONG(BaseEstimator):
                         X_chunk = X_presented[chunk_st:chunk_en].toarray() if sparse else X_presented[chunk_st:chunk_en]
                         pdists = sq_eucl_opt(X_chunk, W).astype(np.float32)
                         if verbose:
-                            print(f'\r |G| = {G.shape[0]}, |X| = {X.shape[0]}, Training chunk {chunk + 1} of {n_chunks}', end='')
+                            print(f'\r  |G| = {G.shape[0]}, |X| = {X_presented.shape[0]}, epoch = {i+1}/{self.max_its}, Training chunk {chunk + 1} of {n_chunks}', end='')
                         W, Y, G, E_q = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, lrdec, im_neix,
                                                              W,
                                                              self.max_epochs_per_sample, G, epsilon,
@@ -337,7 +338,7 @@ class SONG(BaseEstimator):
                     output = ((output) * (self.Y_scale) / 10.) + self.Y_loc
 
             else:
-                self.disp_model = UMAP(learning_rate=self.um_lr, n_epochs=self.um_epochs, init=Y_init, min_dist=self.um_min_dist)
+                self.disp_model = UMAP(learning_rate=self.um_lr, n_components=self.dim, n_epochs=self.um_epochs, init=Y_init, min_dist=self.um_min_dist)
                 X_pc = self.pca.fit_transform(X)
                 if self.verbose:
                     print('\nDispersing output using UMAP...')
@@ -350,17 +351,36 @@ class SONG(BaseEstimator):
 
 
 
-    def get_representatives(self, X):
+    def get_representatives(self, X, reduction = 'PCA'):
 
-        if not issparse(X):
-            min_dist_args = get_closest_for_inputs(np.float32(X), self.W)
+        '''Adding a PCA-reduction to speed up the transform process'''
+
+        if reduction == 'PCA':
+            self.pca = PCA(n_components=np.min([50, X.shape[0], X.shape[1]]) - 1) if not issparse(X) else TruncatedSVD(
+                n_components=np.min([50, X.shape[0], X.shape[1]]))
+            self.pca.fit(X)
+            W_pc = self.pca.transform(self.W).astype(np.float32)
+            X_pc = self.pca.transform(X).astype(np.float32)
+
+            if len(X_pc.shape) == 1:
+                X_pc = np.array([X_pc])
+
+            min_dist_args = []
+            chunk = 1000
+
+            for i in range(X.shape[0] // chunk + 1):
+                X_b = X_pc[i * chunk: (i + 1) * chunk]
+                min_dist_args.extend(list(get_closest_for_inputs(np.float32(X_b), W_pc)))
         else:
+            if len(X.shape) == 1:
+                X = np.array([X])
+
             min_dist_args = []
 
             chunk = 1000
 
-            for i in range(X.shape[0]//chunk + 1):
-                X_b = X[i * chunk : (i+1) * chunk].toarray()
+            for i in range(X.shape[0] // chunk + 1):
+                X_b = X[i * chunk: (i + 1) * chunk].toarray()
                 min_dist_args.extend(list(get_closest_for_inputs(np.float32(X_b), self.W)))
 
         return min_dist_args

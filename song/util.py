@@ -328,7 +328,7 @@ def train_for_batch_online(X_presented, i, max_its, lrst, lrdec, im_neix, W, max
                                              Y, ns_rate, alpha, beta,
                                              lr, rng_state, epoch_vector.astype(np.int32),
                                              neg_epoch_vector.astype(np.int32))
-        E_q[b] += dist_H[b]#/denom
+        E_q[b] += dist_H[b]**.5
 
     return W, Y, G, E_q
 @numba.njit('i4[:](f4[:], i8)')
@@ -391,7 +391,7 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
                                              Y, ns_rate, alpha, beta,
                                              lrs[k], rng_state, epoch_vector.astype(np.int32),
                                              neg_epoch_vector.astype(np.int32))
-        E_q[b] += dist_H[b]#/denom
+        E_q[b] += dist_H[b]**.5
 
     return W, Y, G, E_q
 
