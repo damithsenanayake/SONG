@@ -143,7 +143,7 @@ class SONG(BaseEstimator):
         if not sparse:
             scale = np.median(np.linalg.norm(X-X.mean(axis=0), axis=1))**2
         else:
-            scale = np.median(sp.sparse.linalg.norm(csr_matrix(X[self.random_state.permutation(X.shape[0])[:1000]] - X.mean(axis=0)), axis=1))
+            scale = np.median(sp.sparse.linalg.norm(csr_matrix(X[self.random_state.permutation(X.shape[0])[:1000]] - X.mean(axis=0)), axis=1))**2
             #if not sparse else sp.sparse.linalg.norm(csr_matrix(X), axis=1)) ** 2.
 
         if verbose:
@@ -151,7 +151,7 @@ class SONG(BaseEstimator):
 
         if self.sf is None:
             self.sf = np.log(4) / (2 * self.ss)
-        thresh_g = -np.log(X.shape[1]) * np.log(self.sf) #* (scale)
+        thresh_g = -np.log(X.shape[1]) * np.log(self.sf) * (scale)
 
         so_lr_st = self.lrst
         if self.prototypes is None:
