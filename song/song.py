@@ -84,6 +84,7 @@ class SONG(BaseEstimator):
         self.spread = spread
         self.min_dist = min_dist
         self.n_neighbors = n_neighbors
+        self.random_seed = random_seed
         self.random_state = np.random.RandomState(seed=random_seed)
         self.rng_state = self.random_state.randint(INT32_MIN, INT32_MAX, 3).astype(np.int64)
         self.agility = agility
@@ -115,7 +116,7 @@ class SONG(BaseEstimator):
             self.sampled_batches = low_memory
 
 
-    def fit(self, X):
+    def fit(self, X, reduction = 'PCA'):
         '''
         :param X: The input dataset normalized over the dataset to range [0, 1].
         :param L: If needed, provide labels for the intermediate visualizations. Must be same length as input array and
@@ -123,6 +124,10 @@ class SONG(BaseEstimator):
         :return: Y : The Mapped Coordinates in the desired output space (default = 2 ).
         '''
 
+        if reduction == 'PCA':
+            self.pca = PCA(n_components=np.min([50, X.shape[0], X.shape[1]]) - 1, random_state= self.random_seed) if not issparse(X) else TruncatedSVD(
+            n_components=np.min([50, X.shape[0], X.shape[1]])-1, random_state= self.random_seed)
+            self.pca.fit(X)
         verbose = self.verbose
         sparse = issparse(X)
         min_dist = self.min_dist
@@ -246,7 +251,16 @@ class SONG(BaseEstimator):
                         chunk_st = chunk * chunk_size
                         chunk_en = chunk_st + chunk_size
                         X_chunk = X_presented[chunk_st:chunk_en].toarray() if sparse else X_presented[chunk_st:chunk_en]
-                        pdists = sq_eucl_opt(X_chunk, W).astype(np.float32)
+                        if not X_chunk.shape[0]:
+                            continue
+                        if reduction == 'PCA':
+                            X_chunk_ = self.pca.transform(X_presented[chunk_st:chunk_en])
+                            W_ = self.pca.transform(W)
+                        else:
+                            W_ = W
+                            X_chunk_ = X_chunk
+
+                        pdists = sq_eucl_opt(X_chunk_, W_).astype(np.float32)
                         if verbose:
                             print(f'\r  |G| = {G.shape[0]}, |X| = {X_presented.shape[0]}, epoch = {i+1}/{self.max_its}, Training chunk {chunk + 1} of {n_chunks}', end='')
                         W, Y, G, E_q = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, lrdec, im_neix,
@@ -294,8 +308,7 @@ class SONG(BaseEstimator):
 
 
         if reduction == 'PCA':
-            self.pca = PCA(n_components=np.min([50, X.shape[0], X.shape[1]]) - 1) if not issparse(X) else TruncatedSVD(
-                n_components=np.min([50, X.shape[0], X.shape[1]]))
+
             self.pca.fit(X)
             W_pc = self.pca.transform(self.W).astype(np.float32)
             X_pc = self.pca.transform(X).astype(np.float32)
