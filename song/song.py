@@ -145,9 +145,9 @@ class SONG(BaseEstimator):
             beta = self.beta
 
         if not sparse:
-            scale = np.median(np.linalg.norm(X-X.mean(axis=0), axis=1))**2
+            scale = np.median(np.linalg.norm(X-X.mean(axis=0), axis=1))
         else:
-            scale = np.median(sp.sparse.linalg.norm(csr_matrix(X[self.random_state.permutation(X.shape[0])[:1000]] - X.mean(axis=0)), axis=1))**2
+            scale = np.median(sp.sparse.linalg.norm(csr_matrix(X[self.random_state.permutation(X.shape[0])[:1000]] - X.mean(axis=0)), axis=1))
             #if not sparse else sp.sparse.linalg.norm(csr_matrix(X), axis=1)) ** 2.
 
         if verbose:
@@ -246,6 +246,10 @@ class SONG(BaseEstimator):
 
                     chunk_size =  self.chunk_size
                     n_chunks = X_presented.shape[0]//chunk_size + 1
+                    if reduction == 'PCA':
+                        W_ = self.pca.transform(W).astype(np.float32)
+                    else:
+                        W_ = W
 
                     for chunk in range(n_chunks):
                         chunk_st = chunk * chunk_size
@@ -254,10 +258,8 @@ class SONG(BaseEstimator):
                         if not X_chunk.shape[0]:
                             continue
                         if reduction == 'PCA':
-                            X_chunk_ = self.pca.transform(X_presented[chunk_st:chunk_en])
-                            W_ = self.pca.transform(W)
+                            X_chunk_ = self.pca.transform(X_presented[chunk_st:chunk_en]).astype(np.float32)
                         else:
-                            W_ = W
                             X_chunk_ = X_chunk
 
                         pdists = sq_eucl_opt(X_chunk_, W_).astype(np.float32)
@@ -309,7 +311,6 @@ class SONG(BaseEstimator):
 
         if reduction == 'PCA':
 
-            self.pca.fit(X)
             W_pc = self.pca.transform(self.W).astype(np.float32)
             X_pc = self.pca.transform(X).astype(np.float32)
 

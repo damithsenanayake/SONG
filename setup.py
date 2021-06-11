@@ -3,7 +3,7 @@ import setuptools
 
 setup(
     name = "song_vis",
-    version = "1.3.1.1",
+    version = "1.3.1.2",
     author = "Damith Senanayake",
     author_email = "dracusds123@gmail.com",
     description = "A dimensionality reduction method that retains a parametric model",
