@@ -18,12 +18,12 @@ class SONG(BaseEstimator):
 
     def __init__(self, n_components=2, n_neighbors=2,
                  lr=1., gamma=None, so_steps = None,
-                 spread_factor=0.6,
+                 spread_factor=0.9,
                  spread=1., min_dist=0.1, ns_rate=5,
                  agility=1., verbose=0,
                  max_age=3,
                  random_seed=1, epsilon=.9, a=None, b=None, final_vector_count=None, dispersion_method = None,
-                 online_portion=.0, fvc_growth=0.5, chunk_size = 1000, non_so_rate = 0, low_memory = False, sampled_batches = None, um_min_dist = 0.001, um_lr = 0.01, um_epochs = 11):
+                 online_portion=.0, fvc_growth=0.5, chunk_size = 1000, non_so_rate = 0, low_memory = False, sampled_batches = True, um_min_dist = 0.001, um_lr = 0.01, um_epochs = 11):
 
         ''' Initialize a SONG to reduce data.
 
@@ -123,39 +123,42 @@ class SONG(BaseEstimator):
         same order
         :return: Y : The Mapped Coordinates in the desired output space (default = 2 ).
         '''
+        X = X.astype(np.float32)
 
         if reduction == 'PCA':
-            self.pca = PCA(n_components=np.min([50, X.shape[0], X.shape[1]]) - 1, random_state= self.random_seed) if not issparse(X) else TruncatedSVD(
-            n_components=np.min([50, X.shape[0], X.shape[1]])-1, random_state= self.random_seed)
-            self.pca.fit(X)
+            if self.verbose:
+                print('Fitting Reduction for Neighborhood Function Calculation')
+            self.pca = PCA(n_components=np.min([100, X.shape[0], X.shape[1]]) - 1, random_state= self.random_seed) if not issparse(X) else TruncatedSVD(
+            n_components=np.min([100, X.shape[0], X.shape[1]])-1, random_state= self.random_seed)
+            self.pca.fit(X[self.random_state.permutation(X.shape[0])[:10000]])
+            if self.verbose:
+                print ('reduction model fitted!')
+
+        X_PCA = self.pca.transform(X)
         verbose = self.verbose
         sparse = issparse(X)
         min_dist = self.min_dist
         spread = self.spread
 
+        min_batch = 1000 if not self.sampled_batches else 10000
+
         if self.ss is None:
-            self.ss = (X.shape[0]//1000 * (3 if X.shape[0] < 100000 else 2)) if self.low_memory else (30 if X.shape[0] > 100000 else 50)
+            if not self.sampled_batches:
+                self.ss = (X.shape[0]//1000 * (3 if X.shape[0] < 100000 else 2)) if self.low_memory else (30 if X.shape[0] > 100000 else 50)
+            else:
+                self.ss = X.shape[0] // min_batch + 30
         self.max_its = self.ss * self.non_so_rate
 
-        min_batch = 1000
         if self.alpha is None and self.beta is None:
             alpha, beta = find_spread_tightness(spread, min_dist)
         else:
             alpha = self.alpha
             beta = self.beta
 
-        if not sparse:
-            scale = np.median(np.linalg.norm(X-X.mean(axis=0), axis=1))
-        else:
-            scale = np.median(sp.sparse.linalg.norm(csr_matrix(X[self.random_state.permutation(X.shape[0])[:1000]] - X.mean(axis=0)), axis=1))
-            #if not sparse else sp.sparse.linalg.norm(csr_matrix(X), axis=1)) ** 2.
-
-        if verbose:
-            print(f'scaling factor for growth threshold: {scale}')
 
         if self.sf is None:
             self.sf = np.log(4) / (2 * self.ss)
-        thresh_g = -np.log(X.shape[1]) * np.log(self.sf) * (scale)
+        thresh_g = -np.log(X.shape[1]) * np.log(self.sf)
 
         so_lr_st = self.lrst
         if self.prototypes is None:
@@ -169,7 +172,6 @@ class SONG(BaseEstimator):
 
         im_neix = self.dim + self.n_neighbors
 
-        X = X.astype(np.float32)
         if self.trained:
             ''' When reusing a trained model, this block will be executed.'''
             W = self.W
@@ -208,12 +210,14 @@ class SONG(BaseEstimator):
         drifters = np.array([])
         order = self.random_state.permutation(X.shape[0])
         for i in range(self.max_its):
-
+            E_q *= 0.05
             order = self.random_state.permutation(X.shape[0]) if not self.sampled_batches else order
             if not i % self.non_so_rate:
-                presented_len = int(batch_sizes[soed]) if not self.sampled_batches else 1000
+                presented_len = int(batch_sizes[soed]) if not self.sampled_batches else min_batch
                 soed += 1
             X_presented = X[order[:presented_len]] if not self.sampled_batches else X[(presented_len * i)%X.shape[0] : min((presented_len * i)%X.shape[0]+presented_len, X.shape[0])].astype(np.float32)
+            X_presented_pc = X_PCA[order[:presented_len]] if not self.sampled_batches else X_PCA[(presented_len * i)%X.shape[0] : min((presented_len * i)%X.shape[0]+presented_len, X.shape[0])].astype(np.float32)
+
             if not i % self.non_so_rate:
                 non_growing_iter = 0
                 shp = np.arange(G.shape[0]).astype(np.int32)
@@ -230,48 +234,34 @@ class SONG(BaseEstimator):
                 '''shp is an index set used for optimizing search operations'''
                 shp = np.arange(G.shape[0], dtype=np.int32)
 
-                if verbose:
-                    print(
-                        f'\r  |G| = {G.shape[0]}, |X| = {X_presented.shape[0]}, epoch = {i+1}/{self.max_its}, Self-organizing', end='')
-
-                if ((i * 1. / self.max_its < self.fast_portion) or X.shape[0] < 10000) and not sparse:
-                    '''ONLINE TRAINING for small datasets '''
-                    W, Y, G, E_q = train_for_batch_online(X_presented, i, self.max_its, lrst, lrdec, im_neix, W,
-                                                          self.max_epochs_per_sample, G, epsilon, self.min_strength,
-                                                          shp, Y,
-                                                          self.ns_rate, alpha, beta, self.rng_state, E_q, lr_sigma,
-                                                          self.reduced_lr)
+                chunk_size =  self.chunk_size if i else 100
+                n_chunks = X_presented.shape[0]//chunk_size + 1
+                if reduction == 'PCA':
+                    W_ = self.pca.transform(W).astype(np.float32)
                 else:
-                    '''BATCH TRAINING for large and sparse datasets'''
+                    W_ = W
 
-                    chunk_size =  self.chunk_size
-                    n_chunks = X_presented.shape[0]//chunk_size + 1
+                for chunk in range(n_chunks):
+                    chunk_st = chunk * chunk_size
+                    chunk_en = chunk_st + chunk_size
+                    X_chunk = X_presented[chunk_st:chunk_en].toarray() if sparse else X_presented[chunk_st:chunk_en]
+                    if not X_chunk.shape[0]:
+                        continue
                     if reduction == 'PCA':
-                        W_ = self.pca.transform(W).astype(np.float32)
+                        X_chunk_ = (X_presented_pc[chunk_st:chunk_en]).astype(np.float32)
                     else:
-                        W_ = W
+                        X_chunk_ = X_chunk
 
-                    for chunk in range(n_chunks):
-                        chunk_st = chunk * chunk_size
-                        chunk_en = chunk_st + chunk_size
-                        X_chunk = X_presented[chunk_st:chunk_en].toarray() if sparse else X_presented[chunk_st:chunk_en]
-                        if not X_chunk.shape[0]:
-                            continue
-                        if reduction == 'PCA':
-                            X_chunk_ = self.pca.transform(X_presented[chunk_st:chunk_en]).astype(np.float32)
-                        else:
-                            X_chunk_ = X_chunk
-
-                        pdists = sq_eucl_opt(X_chunk_, W_).astype(np.float32)
-                        if verbose:
-                            print(f'\r  |G| = {G.shape[0]}, |X| = {X_presented.shape[0]}, epoch = {i+1}/{self.max_its}, Training chunk {chunk + 1} of {n_chunks}', end='')
-                        W, Y, G, E_q = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, lrdec, im_neix,
-                                                             W,
-                                                             self.max_epochs_per_sample, G, epsilon,
-                                                             self.min_strength,
-                                                             shp, Y,
-                                                             self.ns_rate, alpha, beta, self.rng_state, E_q,
-                                                             lr_sigma, self.reduced_lr)
+                    pdists = sq_eucl_opt(X_chunk_, W_).astype(np.float32)
+                    if verbose:
+                        print(f'\r  |G| = {G.shape[0]}, |X| = {X_presented.shape[0]}, epoch = {i+1}/{self.max_its}, Training chunk {chunk + 1} of {n_chunks}', end='')
+                    W, Y, G, E_q = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, lrdec, im_neix,
+                                                         W,
+                                                         self.max_epochs_per_sample, G, epsilon,
+                                                         self.min_strength,
+                                                         shp, Y,
+                                                         self.ns_rate, alpha, beta, self.rng_state, E_q,
+                                                         lr_sigma, self.reduced_lr)
 
                 drifters = np.where(G.sum(axis=1) == 0)[0]
 
@@ -300,9 +290,9 @@ class SONG(BaseEstimator):
     def batch_train(self, X):
         pass
 
-    def fit_transform(self, X):
-        self.fit(X)
-        return self.transform(X)
+    def fit_transform(self, X, reduction = 'PCA'):
+        self.fit(X, reduction)
+        return self.transform(X, reduction)
 
     def transform(self, X, reduction = 'PCA'):
 
@@ -346,7 +336,7 @@ class SONG(BaseEstimator):
                 if self.disp_model == None:
                     raise ValueError('Please ensure that your input is larger than 1 vector')
                 else:
-                    x_pc = self.pca.transform(X)
+                    x_pc = X_pc
                     output = self.disp_model.fit_transform(x_pc)
                     output = ((output) * (self.Y_scale) / 10.) + self.Y_loc
 
@@ -366,12 +356,9 @@ class SONG(BaseEstimator):
 
     def get_representatives(self, X, reduction = 'PCA'):
 
-        '''Adding a PCA-reduction to speed up the transform process'''
 
         if reduction == 'PCA':
-            self.pca = PCA(n_components=np.min([50, X.shape[0], X.shape[1]]) - 1) if not issparse(X) else TruncatedSVD(
-                n_components=np.min([50, X.shape[0], X.shape[1]]))
-            self.pca.fit(X)
+
             W_pc = self.pca.transform(self.W).astype(np.float32)
             X_pc = self.pca.transform(X).astype(np.float32)
 
@@ -392,8 +379,8 @@ class SONG(BaseEstimator):
 
             chunk = 1000
 
-            for i in range(X.shape[0] // chunk + 1):
-                X_b = X[i * chunk: (i + 1) * chunk].toarray()
+            for i in range(X.shape[0]//chunk + 1):
+                X_b = X[i * chunk : (i+1) * chunk].toarray()
                 min_dist_args.extend(list(get_closest_for_inputs(np.float32(X_b), self.W)))
 
         return min_dist_args

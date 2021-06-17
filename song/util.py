@@ -227,7 +227,7 @@ def bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y):
                     G[closests][:, drifters[grown]] = 0
                 G[b][closests] = 0
                 G[closests][:, b] = 0
-                E_q[closests] = 0.5
+                E_q[closests] *= 0.
                 grown += 1
 
     return W, G, Y, E_q
@@ -283,7 +283,7 @@ def bulk_grow_sans_drifters(shp, E_q, thresh_g, G, W, Y):
 
                 G[b][closests] = 0
                 G[closests][:, b] = 0
-                E_q[closests] = 0.5
+                E_q[closests] *= 0.
 
     # if np.any(W.sum(axis=1) == 0):
     #     raise Exception('zero vector found')
@@ -391,7 +391,7 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
                                              Y, ns_rate, alpha, beta,
                                              lrs[k], rng_state, epoch_vector.astype(np.int32),
                                              neg_epoch_vector.astype(np.int32))
-        E_q[b] += dist_H[b]#/denom
+        E_q[b] += dist_H[b]/denom
 
     return W, Y, G, E_q
 
@@ -434,7 +434,7 @@ def train_for_input(x, X_presented, i, k, max_its, lrst, lrdec, im_neix, W, max_
                                          Y, ns_rate, alpha, beta,
                                          lr, rng_state, epoch_vector.astype(np.int32),
                                          neg_epoch_vector.astype(np.int32))
-    E_q[b] += dist_H[b]/denom
+    E_q[b] += dist_H[b]**.5#/denom
 
     return W, Y, G, E_q, k, b, neilist, neighbors, lr
 
