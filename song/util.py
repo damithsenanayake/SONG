@@ -233,107 +233,14 @@ def bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y):
     return W, G, Y, E_q
 
 
-@numba.njit(fastmath = True)
-def bulk_grow_sans_drifters(shp, E_q, thresh_g, G, W, Y):
-    growth_size = max(0, len(shp[E_q >= thresh_g]))
-
-    if growth_size:
-        oldG = G
-        oldW = W
-        oldY = Y
-        oldE = E_q
-        old_size = oldW.shape[0]
-        W = np.zeros((W.shape[0] + growth_size, W.shape[1]), dtype=np.float32)
-        W[:-growth_size] = oldW
-
-        Y = np.zeros((Y.shape[0] + growth_size, Y.shape[1]), dtype=np.float32)
-        Y[: -growth_size] = oldY
-
-        G = np.zeros((G.shape[0] + growth_size, G.shape[1] + growth_size), dtype=np.float32)
-        G[:-growth_size][:, :-growth_size] = oldG
-
-        E_q = np.zeros(E_q.shape[0] + growth_size, dtype=np.float32)
-        E_q[:-growth_size] = oldE
-        growing_nodes = shp[oldE >= thresh_g]
-
-        shp = np.arange(G.shape[0]).astype(np.int32)
-
-        if len(growing_nodes) >= 1:
-            for k in range(len(growing_nodes)):
-                b = growing_nodes[k]
-                ''' If no reusable nodes create new nodes'''
-                closests = shp[G[b] == 1]
-                if len(closests) == 0:
-                    closests = shp[G[:, b] == 1]
-                h_bias = 1e-1
-                l_bias = 1e-8
-                W_n = (1 - h_bias) * W[b] + h_bias * (W[closests].sum(axis=0) / len(closests))
-                Y_n = (1 - l_bias) * Y[b] + l_bias * (Y[closests].sum(axis=0) / len(closests))
-                W[old_size + k ] = W_n
-
-                Y[old_size + k] = Y_n
-                ''' connect neighbors to the new node '''
-                G[old_size + k ][b] = 1
-                G[b][old_size + k ] = 0
-                G[old_size + k ][closests] = 1
-                G[closests][:, old_size + k ] = 0
-
-                ''' Append new error. '''
-                E_q[old_size + k -1] = 0
-
-                G[b][closests] = 0
-                G[closests][:, b] = 0
-                E_q[closests] *= 0.
-
-    # if np.any(W.sum(axis=1) == 0):
-    #     raise Exception('zero vector found')
-    return W, G, Y, E_q
-
 
 @numba.njit('f4(f4, f4)', fastmath=True)
 def get_so_rate(tau, sigma):
     return  np.exp(-sigma * tau ** 2)
 
-@numba.njit(fastmath=True, )
-def train_for_batch_online(X_presented, i, max_its, lrst, lrdec, im_neix, W, max_epochs_per_sample, G, epsilon, min_strength,
-                           shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr):
-
-
-    for k in range(len(X_presented)):
-        x = X_presented[k]
-        tau = np.float32((i * X_presented.shape[0] + k) * 1. / (max_its * X_presented.shape[0]))
-        lr = np.float32((pow((1 - tau) , lrdec))) * reduced_lr
-        so_lr = lrst*get_so_rate(i * 1./max_its, lr_sigma)
-
-        nei_len = np.int32(min(im_neix, W.shape[0]))
-        dist_H, neilist = distances_and_neighbors(x, W, nei_len)
-
-        b = neilist[0]
-        G[b] *= epsilon
-
-        G[b][neilist] = 1.
-        G[b][G[b] < min_strength] = 0
-        G[:, b][G[:, b] < min_strength] = 0
-        nei_bin = (G[b] + G[:, b]) > 0
-        neighbors = shp[nei_bin]
-
-        denom = dist_H[neilist[-1]]
-
-        epoch_vector = max_epochs_per_sample * ((G[b] + G[:, b]) / 2. + 1)
-        neg_epoch_vector = ns_rate* (1 - (G[b] + G[:, b]) / 2.) + 1
-
-        '''x, so_lr, b, W, hdist_nei, Y, alpha, beta , lr,  rng_state):'''
-        W[neighbors], Y = train_neighborhood(x, so_lr, b, neighbors.astype(np.int32), W[neighbors],
-                                             dist_H[neighbors] / denom,
-                                             Y, ns_rate, alpha, beta,
-                                             lr, rng_state, epoch_vector.astype(np.int32),
-                                             neg_epoch_vector.astype(np.int32))
-        E_q[b] += dist_H[b]/denom
-
-    return W, Y, G, E_q
 @numba.njit('i4[:](f4[:], i8)')
 def get_closest(dists_2, k):
-    neinds = [1 for _ in range(k)]  # np.ones(n_neis, dtype=np.int32)
+    neinds = [1 for _ in range(k)]
     n_W = len(dists_2)
     for i in range(n_W):
         dist2 = dists_2[i]
@@ -391,52 +298,9 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
                                              Y, ns_rate, alpha, beta,
                                              lrs[k], rng_state, epoch_vector.astype(np.int32),
                                              neg_epoch_vector.astype(np.int32))
-        E_q[b] += dist_H[b]/denom
+        E_q[b] += dist_H[b]#/denom
 
     return W, Y, G, E_q
-
-
-@numba.njit(fastmath=True, )
-def train_for_input(x, X_presented, i, k, max_its, lrst, lrdec, im_neix, W, max_epochs_per_sample, G, epsilon,
-                    min_strength, shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr):
-    dampen = 1
-
-    tau = np.float32((i * X_presented.shape[0] + k) * 1. / (max_its * X_presented.shape[0]))
-    lr = np.float32((pow((1 - tau) , lrdec))) * dampen * reduced_lr
-    so_lr = lrst*get_so_rate(tau, lr_sigma)
-    nei_len = np.int64(min(im_neix, W.shape[0]))
-
-    dist_H, neilist = distances_and_neighbors(x, W, nei_len)
-    if not nei_len == len(np.unique(neilist)):
-        raise Exception('non_unique_elements')
-    b = neilist[0]
-
-    k += 1
-
-    G[b] *= epsilon
-
-    G[b][neilist] = 1.
-
-    G[b][G[b] < min_strength] = 0
-    G[:, b][G[:, b] < min_strength] = 0
-    neighbors = shp[(G[b] + G[:, b]) > 0]
-
-    denom = dist_H[neilist[-1]]
-
-
-    epoch_vector = max_epochs_per_sample * ( (G[b] + G[:, b]) / 2. + 1)
-
-    neg_epoch_vector = ns_rate * (1 -  (G[b] + G[:, b]) / 2.)
-
-    '''x, so_lr, b, W, hdist_nei, Y, alpha, beta , lr,  rng_state):'''
-    W[neighbors], Y = train_neighborhood(x, so_lr, b, neighbors.astype(np.int32), W[neighbors],
-                                         dist_H[neighbors] / denom,
-                                         Y, ns_rate, alpha, beta,
-                                         lr, rng_state, epoch_vector.astype(np.int32),
-                                         neg_epoch_vector.astype(np.int32))
-    E_q[b] += dist_H[b]**.5#/denom
-
-    return W, Y, G, E_q, k, b, neilist, neighbors, lr
 
 
 @numba.njit(

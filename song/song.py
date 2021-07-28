@@ -1,13 +1,11 @@
 import numpy as np
-
 from umap import UMAP
 from sklearn.decomposition import PCA, TruncatedSVD
-from scipy.sparse import issparse, csr_matrix
-import scipy as sp
+from scipy.sparse import issparse
 from sklearn.base import BaseEstimator
 
 from song.util import find_spread_tightness, \
-    train_for_batch_online, bulk_grow_sans_drifters, bulk_grow_with_drifters, embed_batch_epochs, \
+    bulk_grow_with_drifters, embed_batch_epochs, \
     train_for_batch_batch, sq_eucl_opt, get_closest_for_inputs
 
 INT32_MIN = np.iinfo(np.int32).min + 1
@@ -16,14 +14,14 @@ INT32_MAX = np.iinfo(np.int32).max - 1
 
 class SONG(BaseEstimator):
 
-    def __init__(self, n_components=2, n_neighbors=2,
+    def __init__(self, n_components=2, n_neighbors=1,
                  lr=1., gamma=None, so_steps = None,
-                 spread_factor=0.9,
+                 spread_factor=0.01,
                  spread=1., min_dist=0.1, ns_rate=5,
                  agility=1., verbose=0,
                  max_age=3,
-                 random_seed=1, epsilon=.9, a=None, b=None, final_vector_count=None, dispersion_method = None,
-                 online_portion=.0, fvc_growth=0.5, chunk_size = 1000, non_so_rate = 0, low_memory = False, sampled_batches = True, um_min_dist = 0.001, um_lr = 0.01, um_epochs = 11):
+                 random_seed=1, epsilon=.9, a=None, b=None, final_vector_count=None, dispersion_method = 'UMAP',
+                 fvc_growth=0.5, chunk_size = 1000, non_so_rate = 0, low_memory = False, sampled_batches = False, um_min_dist = 0.001, um_lr = 0.01, um_epochs = 11):
 
         ''' Initialize a SONG to reduce data.
 
@@ -67,8 +65,6 @@ class SONG(BaseEstimator):
 
         :param final_vector_count : the number of expected final coding vectors.
 
-        :param online_portion : the portion of online distance calculation operations. if 1.0 all distances will be
-        calculated online for all iterations. If 0.5, the latter half will be calculated batch-wise. Can be (0, 1.].
 
         :param fvc_growth: In incremental scenarios, what is the expected growth ratio of coding vectors in subsequent
         visualizations.
@@ -97,7 +93,6 @@ class SONG(BaseEstimator):
         self.max_age = max_age
         self.reduced_lr = 1.
         self.prototypes = None
-        self.fast_portion = online_portion
         self.min_strength = epsilon ** ((self.dim + self.max_age))
         self.ss = so_steps
         self.non_so_rate = non_so_rate + 1
@@ -128,13 +123,13 @@ class SONG(BaseEstimator):
         if reduction == 'PCA':
             if self.verbose:
                 print('Fitting Reduction for Neighborhood Function Calculation')
-            self.pca = PCA(n_components=np.min([100, X.shape[0], X.shape[1]]) - 1, random_state= self.random_seed) if not issparse(X) else TruncatedSVD(
+            self.pca = PCA(n_components=np.min([100, X.shape[0], X.shape[1]]) , random_state= self.random_seed) if not issparse(X) else TruncatedSVD(
             n_components=np.min([100, X.shape[0], X.shape[1]])-1, random_state= self.random_seed)
             self.pca.fit(X[self.random_state.permutation(X.shape[0])[:10000]])
             if self.verbose:
                 print ('reduction model fitted!')
 
-        X_PCA = self.pca.transform(X)
+        X_PCA = self.pca.transform(X) if X.shape[1] > 100 else X
         verbose = self.verbose
         sparse = issparse(X)
         min_dist = self.min_dist
@@ -146,7 +141,7 @@ class SONG(BaseEstimator):
             if not self.sampled_batches:
                 self.ss = (X.shape[0]//1000 * (3 if X.shape[0] < 100000 else 2)) if self.low_memory else (30 if X.shape[0] > 100000 else 50)
             else:
-                self.ss = X.shape[0] // min_batch + 30
+                self.ss = X.shape[0] // min_batch + 10
         self.max_its = self.ss * self.non_so_rate
 
         if self.alpha is None and self.beta is None:
@@ -210,7 +205,6 @@ class SONG(BaseEstimator):
         drifters = np.array([])
         order = self.random_state.permutation(X.shape[0])
         for i in range(self.max_its):
-            E_q *= 0.05
             order = self.random_state.permutation(X.shape[0]) if not self.sampled_batches else order
             if not i % self.non_so_rate:
                 presented_len = int(batch_sizes[soed]) if not self.sampled_batches else min_batch
@@ -223,20 +217,15 @@ class SONG(BaseEstimator):
                 shp = np.arange(G.shape[0]).astype(np.int32)
 
                 if self.prototypes >= G.shape[0] and i > 0:
-
                     ''' Growing of new coding vectors and low-dimensional vectors '''
-
-                    if not len(drifters):
-                        W, G, Y, E_q = bulk_grow_sans_drifters(shp, E_q, thresh_g, G, W, Y)
-                    else:
-                        W, G, Y, E_q = bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y)
+                    W, G, Y, E_q = bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y)
 
                 '''shp is an index set used for optimizing search operations'''
                 shp = np.arange(G.shape[0], dtype=np.int32)
 
                 chunk_size =  self.chunk_size if i else 100
                 n_chunks = X_presented.shape[0]//chunk_size + 1
-                if reduction == 'PCA':
+                if reduction == 'PCA' and X.shape[1] > 100:
                     W_ = self.pca.transform(W).astype(np.float32)
                 else:
                     W_ = W
@@ -326,7 +315,8 @@ class SONG(BaseEstimator):
                 min_dist_args.extend(list(get_closest_for_inputs(np.float32(X_b), self.W)))
 
         output = self.Y[min_dist_args]
-        Y = output.copy()
+
+        Y = output
         if self.dispersion_method == 'UMAP':
             ''' This step is needed to synchronize with UMAP dispersion'''
             self.Y_loc = Y.min(axis=0)
@@ -342,7 +332,6 @@ class SONG(BaseEstimator):
 
             else:
                 self.disp_model = UMAP(learning_rate=self.um_lr, n_components=self.dim, n_epochs=self.um_epochs, init=Y_init, min_dist=self.um_min_dist)
-                X_pc = self.pca.fit_transform(X)
                 if self.verbose:
                     print('\nDispersing output using UMAP...')
                 output = self.disp_model.fit_transform(X_pc)
