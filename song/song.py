@@ -111,7 +111,7 @@ class SONG(BaseEstimator):
             self.sampled_batches = low_memory
 
 
-    def fit(self, X, reduction = 'PCA'):
+    def fit(self, X, reduction = 'PCA', corrected_PC = np.array([])):
         '''
         :param X: The input dataset normalized over the dataset to range [0, 1].
         :param L: If needed, provide labels for the intermediate visualizations. Must be same length as input array and
@@ -128,8 +128,10 @@ class SONG(BaseEstimator):
             self.pca.fit(X[self.random_state.permutation(X.shape[0])[:10000]])
             if self.verbose:
                 print ('reduction model fitted!')
-
-        X_PCA = self.pca.transform(X) if X.shape[1] > 100 else X
+        if not corrected_PC.shape[0]:
+            X_PCA = self.pca.transform(X) if X.shape[1] > 100 else X
+        else:
+            X_PCA = corrected_PC
         verbose = self.verbose
         sparse = issparse(X)
         min_dist = self.min_dist
