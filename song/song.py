@@ -21,7 +21,7 @@ class SONG(BaseEstimator):
                  agility=1., verbose=0,
                  max_age=3,
                  random_seed=1, epsilon=.9, a=None, b=None, final_vector_count=None, dispersion_method = 'UMAP',
-                 fvc_growth=0.5, chunk_size = 1000, non_so_rate = 0, low_memory = False, sampled_batches = False, um_min_dist = 0.001, um_lr = 0.01, um_epochs = 11):
+                 fvc_growth=0.5, chunk_size = 1000, pc_components = 50, non_so_rate = 0, low_memory = False, sampled_batches = False, um_min_dist = 0.001, um_lr = 0.01, um_epochs = 11):
 
         ''' Initialize a SONG to reduce data.
 
@@ -104,6 +104,8 @@ class SONG(BaseEstimator):
         self.um_epochs = um_epochs
         self.um_min_dist = um_min_dist
         self.chunk_size = chunk_size
+        self.pca = None
+        self.pc_components = pc_components
 
         if not sampled_batches is None:
             self.sampled_batches = sampled_batches
@@ -120,11 +122,11 @@ class SONG(BaseEstimator):
         '''
         X = X.astype(np.float32)
 
-        if reduction == 'PCA':
+        if reduction == 'PCA' and not self.pca:
             if self.verbose:
                 print('Fitting Reduction for Neighborhood Function Calculation')
-            self.pca = PCA(n_components=np.min([100, X.shape[0], X.shape[1]]) , random_state= self.random_seed) if not issparse(X) else TruncatedSVD(
-            n_components=np.min([100, X.shape[0], X.shape[1]])-1, random_state= self.random_seed)
+            self.pca = PCA(n_components=np.min([self.pc_components, X.shape[0], X.shape[1]]) , random_state= self.random_seed) if not issparse(X) else TruncatedSVD(
+            n_components=np.min([self.pc_components, X.shape[0], X.shape[1]])-1, random_state= self.random_seed)
             self.pca.fit(X[self.random_state.permutation(X.shape[0])[:10000]])
             if self.verbose:
                 print ('reduction model fitted!')
@@ -141,7 +143,7 @@ class SONG(BaseEstimator):
 
         if self.ss is None:
             if not self.sampled_batches:
-                self.ss = (X.shape[0]//1000 * (3 if X.shape[0] < 100000 else 2)) if self.low_memory else (30 if X.shape[0] > 100000 else 50)
+                self.ss = 20#(20 if X.shape[0] > 100000 else 20)
             else:
                 self.ss = X.shape[0] // min_batch + 10
         self.max_its = self.ss * self.non_so_rate
@@ -201,7 +203,7 @@ class SONG(BaseEstimator):
         soeds = np.arange(self.ss)
         sratios = ((soeds) * 1. / (self.ss - 1))
 
-        batch_sizes = (X.shape[0] - min_batch) * ((sratios * 0) if self.low_memory else sratios ** (10) ) + min_batch
+        batch_sizes = (X.shape[0] - min_batch) * ((sratios * 0) if self.low_memory else sratios ** (100) ) + min_batch
         epsilon = self.epsilon
         lr_sigma = np.float32(5)
         drifters = np.array([])
@@ -281,11 +283,11 @@ class SONG(BaseEstimator):
     def batch_train(self, X):
         pass
 
-    def fit_transform(self, X, reduction = 'PCA'):
-        self.fit(X, reduction)
+    def fit_transform(self, X, reduction = 'PCA', corrected_PC = np.array([])):
+        self.fit(X, reduction, corrected_PC)
         return self.transform(X, reduction)
 
-    def transform(self, X, reduction = 'PCA'):
+    def transform(self, X, reduction = 'PCA', corrected_PC = np.array([])):
 
         '''Adding a PCA-reduction to speed up the transform process'''
 
@@ -293,8 +295,10 @@ class SONG(BaseEstimator):
         if reduction == 'PCA':
 
             W_pc = self.pca.transform(self.W).astype(np.float32)
-            X_pc = self.pca.transform(X).astype(np.float32)
-
+            if not corrected_PC.shape[0]:
+                X_pc = self.pca.transform(X).astype(np.float32)
+            else:
+                X_pc = corrected_PC
             if len(X_pc.shape) == 1:
                 X_pc = np.array([X_pc])
 
@@ -345,14 +349,16 @@ class SONG(BaseEstimator):
 
 
 
-    def get_representatives(self, X, reduction = 'PCA'):
+    def get_representatives(self, X, reduction = 'PCA', corrected_PC = np.array([])):
 
 
         if reduction == 'PCA':
 
             W_pc = self.pca.transform(self.W).astype(np.float32)
-            X_pc = self.pca.transform(X).astype(np.float32)
-
+            if not corrected_PC.shape[0]:
+                X_pc = self.pca.transform(X).astype(np.float32)
+            else:
+                X_pc = corrected_PC
             if len(X_pc.shape) == 1:
                 X_pc = np.array([X_pc])
 
