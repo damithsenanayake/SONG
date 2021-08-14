@@ -1,6 +1,6 @@
 import numpy as np
 from umap import UMAP
-from sklearn.decomposition import PCA, TruncatedSVD
+from sklearn.decomposition import PCA, TruncatedSVD, IncrementalPCA
 from scipy.sparse import issparse
 from sklearn.base import BaseEstimator
 
@@ -112,6 +112,31 @@ class SONG(BaseEstimator):
         else:
             self.sampled_batches = low_memory
 
+    def _train_pca(self, X):
+
+        self.pca = PCA(n_components=np.min([self.pc_components, X.shape[0], X.shape[1]]), random_state = self.random_seed)
+        self.pca.fit(X.toarray() if issparse(X) else X)
+
+    def _get_XPCA(self, X):
+        nc = np.min([self.pc_components, X.shape[0], X.shape[1]])
+        X_pca = np.zeros((X.shape[0], nc))
+        chunk_size = 5000
+        if issparse(X):
+            n_chunks = X.shape[0] // chunk_size + 1
+
+            for i in range(n_chunks):
+                st = i * chunk_size
+                et = (i + 1) * chunk_size
+
+                X_c = X[st:et].toarray()
+                if X_c.shape[0]:
+                    X_pca[st:et] = self.pca.transform(X_c)
+
+        else:
+
+            X_pca = self.pca.transform(X)
+
+        return X_pca
 
     def fit(self, X, reduction = 'PCA', corrected_PC = np.array([])):
         '''
@@ -125,13 +150,13 @@ class SONG(BaseEstimator):
         if reduction == 'PCA' and not self.pca:
             if self.verbose:
                 print('Fitting Reduction for Neighborhood Function Calculation')
-            self.pca = PCA(n_components=np.min([self.pc_components, X.shape[0], X.shape[1]]) , random_state= self.random_seed) if not issparse(X) else TruncatedSVD(
-            n_components=np.min([self.pc_components, X.shape[0], X.shape[1]])-1, random_state= self.random_seed)
-            self.pca.fit(X[self.random_state.permutation(X.shape[0])[:10000]])
+            self._train_pca(X[self.random_state.permutation(X.shape[0])[:10000]])
+
             if self.verbose:
                 print ('reduction model fitted!')
         if not corrected_PC.shape[0]:
-            X_PCA = self.pca.transform(X) if X.shape[1] > 100 else X
+
+            X_PCA = self._get_XPCA(X)
         else:
             X_PCA = corrected_PC
         verbose = self.verbose
@@ -157,7 +182,7 @@ class SONG(BaseEstimator):
 
         if self.sf is None:
             self.sf = np.log(4) / (2 * self.ss)
-        thresh_g = -np.log(X.shape[1]) * np.log(self.sf)
+        thresh_g = -np.log(X.shape[1] if not sparse else X_PCA.shape[1]) * np.log(self.sf)
 
         so_lr_st = self.lrst
         if self.prototypes is None:
@@ -296,7 +321,7 @@ class SONG(BaseEstimator):
 
             W_pc = self.pca.transform(self.W).astype(np.float32)
             if not corrected_PC.shape[0]:
-                X_pc = self.pca.transform(X).astype(np.float32)
+                X_pc = self._get_XPCA(X)
             else:
                 X_pc = corrected_PC
             if len(X_pc.shape) == 1:
@@ -356,7 +381,7 @@ class SONG(BaseEstimator):
 
             W_pc = self.pca.transform(self.W).astype(np.float32)
             if not corrected_PC.shape[0]:
-                X_pc = self.pca.transform(X).astype(np.float32)
+                X_pc = self._get_XPCA(X)
             else:
                 X_pc = corrected_PC
             if len(X_pc.shape) == 1:
