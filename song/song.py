@@ -112,6 +112,9 @@ class SONG(BaseEstimator):
         else:
             self.sampled_batches = low_memory
 
+    def __repr__(self):
+        return f'SONG model: n(coding vectors) = {self.W.shape[0]}, n(dimensions) = {self.W.shape[1]}, n(components) = {self.Y.shape[1]}' if self.trained else f'untrained SONG model'
+
     def _train_pca(self, X):
 
         self.pca = PCA(n_components=np.min([self.pc_components, X.shape[0], X.shape[1]]), random_state = self.random_seed)
@@ -182,7 +185,9 @@ class SONG(BaseEstimator):
 
         if self.sf is None:
             self.sf = np.log(4) / (2 * self.ss)
-        thresh_g = -np.log(X.shape[1] if not sparse else X_PCA.shape[1]) * np.log(self.sf)
+
+        error_scale = np.median(np.linalg.norm(X-X.mean(axis=0) if not (reduction == 'PCA') else X_PCA-X_PCA.mean(axis=0), axis=1))
+        thresh_g = -np.log(X.shape[1]) if not (reduction=='PCA') else -(X_PCA.shape[1]) * np.log(self.sf) * error_scale
 
         so_lr_st = self.lrst
         if self.prototypes is None:
@@ -298,7 +303,7 @@ class SONG(BaseEstimator):
         self.W = W
         self.Y = Y
         self.G = G
-        self.E_q = E_q * 0
+        self.E_q = E_q
         self.so_lr_st = so_lr_st
         self.trained = True
         if verbose:
