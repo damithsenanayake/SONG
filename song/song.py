@@ -150,18 +150,21 @@ class SONG(BaseEstimator):
         '''
         X = X.astype(np.float32)
 
-        if reduction == 'PCA' and not corrected_PC.shape[0]:
-            if self.verbose:
-                print('Fitting Reduction for Neighborhood Function Calculation')
-            self._train_pca(X[self.random_state.permutation(X.shape[0])[:10000]])
+        if reduction == 'PCA' and X.shape[1] > 50:
+            if not corrected_PC.shape[0]:
+                if self.verbose:
+                    print('Fitting Reduction for Neighborhood Function Calculation')
+                self._train_pca(X[self.random_state.permutation(X.shape[0])[:10000]])
 
-            if self.verbose:
-                print ('reduction model fitted!')
-        if not corrected_PC.shape[0]:
+                if self.verbose:
+                    print ('reduction model fitted!')
+            if not corrected_PC.shape[0]:
 
-            X_PCA = self._get_XPCA(X)
+                X_PCA = self._get_XPCA(X)
+            else:
+                X_PCA = corrected_PC
         else:
-            X_PCA = corrected_PC
+            X_PCA = X
         verbose = self.verbose
         sparse = issparse(X)
         min_dist = self.min_dist
@@ -322,7 +325,7 @@ class SONG(BaseEstimator):
         '''Adding a PCA-reduction to speed up the transform process'''
 
 
-        if reduction == 'PCA':
+        if reduction == 'PCA' and X.shape[1]>50:
 
             W_pc = self.pca.transform(self.W).astype(np.float32)
             if not corrected_PC.shape[0]:
@@ -339,6 +342,7 @@ class SONG(BaseEstimator):
                 X_b = X_pc[i * chunk: (i + 1) * chunk]
                 min_dist_args.extend(list(get_closest_for_inputs(np.float32(X_b), W_pc)))
         else:
+            X_pc = X
             if len(X.shape) == 1:
                 X = np.array([X])
 
@@ -347,7 +351,7 @@ class SONG(BaseEstimator):
             chunk = 1000
 
             for i in range(X.shape[0]//chunk + 1):
-                X_b = X[i * chunk : (i+1) * chunk].toarray()
+                X_b = X[i * chunk : (i+1) * chunk].toarray() if issparse(X) else X[i * chunk : (i+1) * chunk]
                 min_dist_args.extend(list(get_closest_for_inputs(np.float32(X_b), self.W)))
 
         output = self.Y[min_dist_args]
@@ -381,8 +385,7 @@ class SONG(BaseEstimator):
 
     def get_representatives(self, X, reduction = 'PCA', corrected_PC = np.array([])):
 
-
-        if reduction == 'PCA':
+        if reduction == 'PCA' and X.shape[1] > 50:
 
             W_pc = self.pca.transform(self.W).astype(np.float32)
             if not corrected_PC.shape[0]:
@@ -406,8 +409,8 @@ class SONG(BaseEstimator):
 
             chunk = 1000
 
-            for i in range(X.shape[0]//chunk + 1):
-                X_b = X[i * chunk : (i+1) * chunk].toarray()
+            for i in range(X.shape[0] // chunk + 1):
+                X_b = X[i * chunk: (i + 1) * chunk].toarray() if issparse(X) else X[i * chunk: (i + 1) * chunk]
                 min_dist_args.extend(list(get_closest_for_inputs(np.float32(X_b), self.W)))
 
         return min_dist_args
