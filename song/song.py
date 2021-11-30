@@ -340,7 +340,7 @@ class SONG(BaseEstimator):
 
             for i in range(X.shape[0] // chunk + 1):
                 X_b = X_pc[i * chunk: (i + 1) * chunk]
-                min_dist_args.extend(list(get_closest_for_inputs(np.float32(X_b), W_pc)))
+                min_dist_args.extend(list(get_closest_for_inputs(np.float32(X_b), W_pc)[0]))
         else:
             X_pc = X
             if len(X.shape) == 1:
@@ -352,7 +352,7 @@ class SONG(BaseEstimator):
 
             for i in range(X.shape[0]//chunk + 1):
                 X_b = X[i * chunk : (i+1) * chunk].toarray() if issparse(X) else X[i * chunk : (i+1) * chunk]
-                min_dist_args.extend(list(get_closest_for_inputs(np.float32(X_b), self.W)))
+                min_dist_args.extend(list(get_closest_for_inputs(np.float32(X_b), self.W)[0]))
 
         output = self.Y[min_dist_args]
 
@@ -396,21 +396,28 @@ class SONG(BaseEstimator):
                 X_pc = np.array([X_pc])
 
             min_dist_args = []
+            min_dists = []
             chunk = 1000
 
             for i in range(X.shape[0] // chunk + 1):
                 X_b = X_pc[i * chunk: (i + 1) * chunk]
-                min_dist_args.extend(list(get_closest_for_inputs(np.float32(X_b), W_pc)))
+                min_pos, min_val = get_closest_for_inputs(np.float32(X_b), W_pc)
+                min_dist_args.extend(list(min_pos))
+                min_dists.extend(list(min_val))
+
         else:
             if len(X.shape) == 1:
                 X = np.array([X])
 
             min_dist_args = []
-
+            min_dists = []
             chunk = 1000
 
             for i in range(X.shape[0] // chunk + 1):
                 X_b = X[i * chunk: (i + 1) * chunk].toarray() if issparse(X) else X[i * chunk: (i + 1) * chunk]
-                min_dist_args.extend(list(get_closest_for_inputs(np.float32(X_b), self.W)))
 
-        return min_dist_args
+                min_pos, min_val = get_closest_for_inputs(np.float32(X_b), self.W)
+                min_dist_args.extend(list(min_pos))
+                min_dists.extend(list(min_val))
+
+        return min_dist_args, min_dists

@@ -88,6 +88,7 @@ def sq_eucl_opt(A, B):
 @numba.njit(fastmath=True)
 def get_closest_for_inputs(X, W):
     min_dist_args = np.zeros(X.shape[0], dtype=np.int64)#
+    min_dists = np.zeros(X.shape[0], dtype = np.int64)
     batch_len = 5000
 
     for b in range(len(X)//batch_len + 1):
@@ -97,8 +98,8 @@ def get_closest_for_inputs(X, W):
         for i in range(pdists.shape[0]):
 
             min_dist_args[b*batch_len + i] = pdists[i].argmin()
-
-    return min_dist_args
+            min_dists[b*batch_len + i] = pdists[i].min()
+    return min_dist_args, min_dists
 
 
 @numba.njit("Tuple((f4[:], i4[:]))(f4[:],f4[:,:], i8)", fastmath=True, parallel=True)
