@@ -3,10 +3,12 @@ from umap import UMAP
 from sklearn.decomposition import PCA, TruncatedSVD, IncrementalPCA
 from scipy.sparse import issparse
 from sklearn.base import BaseEstimator
+from umap.umap_ import optimize_layout_euclidean
+from scipy.sparse import coo_matrix
 
 from song.util import find_spread_tightness, \
     bulk_grow_with_drifters, embed_batch_epochs, \
-    train_for_batch_batch, sq_eucl_opt, get_closest_for_inputs
+    train_for_batch_batch, sq_eucl_opt, get_closest_for_inputs, get_fast_knn
 
 INT32_MIN = np.iinfo(np.int32).min + 1
 INT32_MAX = np.iinfo(np.int32).max - 1
@@ -150,7 +152,7 @@ class SONG(BaseEstimator):
         '''
         X = X.astype(np.float32)
 
-        if reduction == 'PCA' and X.shape[1] > 50:
+        if reduction == 'PCA' and X.shape[1] > self.pc_components:
             if not corrected_PC.shape[0]:
                 if self.verbose:
                     print('Fitting Reduction for Neighborhood Function Calculation')
@@ -173,7 +175,7 @@ class SONG(BaseEstimator):
         min_batch = 1000 if not self.sampled_batches else 10000
 
         if self.ss is None:
-            if not self.sampled_batches:
+            if X.shape[0] < 100000 or not self.sampled_batches:
                 self.ss = 100#(20 if X.shape[0] > 100000 else 20)
             else:
                 self.ss = X.shape[0] // min_batch + 10
@@ -181,6 +183,8 @@ class SONG(BaseEstimator):
 
         if self.alpha is None and self.beta is None:
             alpha, beta = find_spread_tightness(spread, min_dist)
+            self.alpha = alpha
+            self.beta = beta
         else:
             alpha = self.alpha
             beta = self.beta
@@ -325,9 +329,9 @@ class SONG(BaseEstimator):
         '''Adding a PCA-reduction to speed up the transform process'''
 
 
-        if reduction == 'PCA' and X.shape[1]>50:
+        if reduction == 'PCA' and X.shape[1]>self.pc_components:
 
-            W_pc = self.pca.transform(self.W).astype(np.float32)
+            W_pc = self._get_XPCA(self.W).astype(np.float32)
             if not corrected_PC.shape[0]:
                 X_pc = self._get_XPCA(X)
             else:
@@ -345,7 +349,7 @@ class SONG(BaseEstimator):
             X_pc = X
             if len(X.shape) == 1:
                 X = np.array([X])
-
+            W_pc = self.W
             min_dist_args = []
 
             chunk = 1000
@@ -358,29 +362,41 @@ class SONG(BaseEstimator):
 
         Y = output
         if self.dispersion_method == 'UMAP':
-            ''' This step is needed to synchronize with UMAP dispersion'''
-            self.Y_loc = Y.min(axis=0)
-            self.Y_scale = Y.max(axis=0) - Y.min(axis=0)
-            Y_init = 10 * (Y - self.Y_loc) / self.Y_scale
-            if Y.shape[0] == 1:
-                if self.disp_model == None:
-                    raise ValueError('Please ensure that your input is larger than 1 vector')
-                else:
-                    x_pc = X_pc
-                    output = self.disp_model.fit_transform(x_pc)
-                    output = ((output) * (self.Y_scale) / 10.) + self.Y_loc
-
-            else:
-                self.disp_model = UMAP(learning_rate=self.um_lr, n_components=self.dim, n_epochs=self.um_epochs, init=Y_init, min_dist=self.um_min_dist)
-                if self.verbose:
-                    print('\nDispersing output using UMAP...')
-                output = self.disp_model.fit_transform(X_pc)
-                output = ((output) * (self.Y_scale) / 10.) + self.Y_loc
-            if self.verbose:
-                print('\nUMAP dispersion finished!')
+            # ''' This step is needed to synchronize with UMAP dispersion'''
+            # self.Y_loc = Y.min(axis=0)
+            # self.Y_scale = Y.max(axis=0) - Y.min(axis=0)
+            # Y_init = 10 * (Y - self.Y_loc) / self.Y_scale
+            # if Y.shape[0] == 1:
+            #     if self.disp_model == None:
+            #         raise ValueError('Please ensure that your input is larger than 1 vector')
+            #     else:
+            #         x_pc = X_pc
+            #         output = self.disp_model.fit_transform(x_pc)
+            #         output = ((output) * (self.Y_scale) / 10.) + self.Y_loc
+            #
+            # else:
+            #     self.disp_model = UMAP(learning_rate=self.um_lr, n_components=self.dim, n_epochs=self.um_epochs, init=Y_init, min_dist=self.um_min_dist)
+            #     if self.verbose:
+            #         print('\nDispersing output using UMAP...')
+            #     output = self.disp_model.fit_transform(X_pc)
+            #     output = ((output) * (self.Y_scale) / 10.) + self.Y_loc
+            # if self.verbose:
+            #     print('\nUMAP dispersion finished!')
+            output = self.get_umap_dispersion(Y, X_pc.astype(np.float32), W_pc.astype(np.float32))
 
         return output
 
+    def get_umap_dispersion(self, Y_init, X_pc, W_pc):
+        if self.verbose:
+            print('constructing graph')
+        values, rows, cols = get_fast_knn(X_pc,  W_pc, 10, self.G)
+
+        epochs_per_sample = np.exp(-values) * 5
+        if self.verbose:
+            print('optimizing layout')
+        Y = optimize_layout_euclidean(Y_init, Y_init.copy(), rows, cols, 25, X_pc.shape[0], epochs_per_sample, self.alpha, self.beta, self.rng_state, initial_alpha=0.1)
+
+        return Y
 
 
     def get_representatives(self, X, reduction = 'PCA', corrected_PC = np.array([])):

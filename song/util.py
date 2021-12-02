@@ -102,39 +102,118 @@ def get_closest_for_inputs(X, W):
     return min_dist_args, min_dists
 
 
-@numba.njit("Tuple((f4[:], i4[:]))(f4[:],f4[:,:], i8)", fastmath=True, parallel=True)
-def distances_and_neighbors(x, W, n_neis):
-    dists_2 = np.ones(W.shape[0], dtype=np.float32) * np.float32(np.inf)
-    neinds = [np.int32(1) for _ in range(n_neis)]#np.ones(n_neis, dtype=np.int32)
-    n_W = np.int32(W.shape[0])
-    n_dim = np.int32(W.shape[1])
-    for i in range(n_W):
-        w = W[i]
-        dist2 = np.float32(0)
-        for k in range(n_dim):
-            dist2 += pow(w[k] - x[k], 2)
-        dists_2[i] = dist2
+# @numba.njit("Tuple((f4[:], i4[:]))(f4[:],f4[:,:], i8)", fastmath=True, parallel=True)
+# def distances_and_neighbors(x, W, n_neis):
+#     dists_2 = np.ones(W.shape[0], dtype=np.float32) * np.float32(np.inf)
+#     neinds = [np.int32(1) for _ in range(n_neis)]#np.ones(n_neis, dtype=np.int32)
+#     n_W = np.int32(W.shape[0])
+#     n_dim = np.int32(W.shape[1])
+#     for i in range(n_W):
+#         w = W[i]
+#         dist2 = np.float32(0)
+#         for k in range(n_dim):
+#             dist2 += pow(w[k] - x[k], 2)
+#         dists_2[i] = dist2
+#
+#         ''' place dist2 in the neighbor list'''
+#         e = dist2
+#
+#         if i < n_neis or dists_2[neinds[-1]] > e:
+#             end = min(n_neis - 1, i)
+#             mid = (end + 1) // 2
+#             beg = 0
+#             while end - beg and not (mid == beg or mid == end):
+#                 if dists_2[neinds[mid]] > e:
+#                     end = mid
+#                 else:
+#                     beg = mid
+#                 mid = beg + (end - beg) // 2
+#             offset = dists_2[neinds[mid]] < e
+#             neinds.insert(mid + offset, i)
+#             neinds = neinds[:n_neis+1]
+#
+#
+#     return dists_2, np.array(neinds[1:], dtype=np.int32)
+@numba.njit()
+def get_fast_pairwise(X, W, k):
+    min_dist_args = np.zeros((X.shape[0], k), dtype=np.int64)  #
+    min_dists = np.zeros((X.shape[0],k), dtype=np.int64)
+    batch_len = 5000
 
-        ''' place dist2 in the neighbor list'''
-        e = dist2
+    for b in range(len(X) // batch_len + 1):
 
-        if i < n_neis or dists_2[neinds[-1]] > e:
-            end = min(n_neis - 1, i)
-            mid = (end + 1) // 2
-            beg = 0
-            while end - beg and not (mid == beg or mid == end):
-                if dists_2[neinds[mid]] > e:
-                    end = mid
-                else:
-                    beg = mid
-                mid = beg + (end - beg) // 2
-            offset = dists_2[neinds[mid]] < e
-            neinds.insert(mid + offset, i)
-            neinds = neinds[:n_neis]
+        pdists = sq_eucl_opt(X[b * batch_len: (b + 1) * batch_len], W)
+
+        for i in range(pdists.shape[0]):
+            min_dist_args[b * batch_len + i] = pdists[i].argsort()[:k]
+            min_dists[b * batch_len + i] = pdists[i][min_dist_args[b * batch_len + i]]
+    return min_dist_args, min_dists
 
 
-    return dists_2, np.array(neinds, dtype=np.int32)
+# @numba.njit(fastmath=True)
+def get_knn(X, W, k):
+    # knn_ixs = np.zeros((X.shape[0], k), dtype=np.int32)
+    # knn_dists = np.zeros((knn_ixs.shape), dtype=np.float32)
+    # for i in range(X.shape[0]):
+    #     x = X[i]
+        # dist2, nei_ixs = distances_and_neighbors(x, W, k)
+    knn_ixs, knn_dists = get_fast_pairwise(X, W, k)
+        # knn_ixs[i] = nei_ixs
+        # knn_dists[i] = dist2[nei_ixs]
+    return knn_ixs, knn_dists
 
+# @numba.njit(fastmath=True)
+def has_zero(X):
+
+    output = np.zeros(X.shape[0])
+
+    for i in range(X.shape[0]):
+        p = 1
+        for j in range(X.shape[1]):
+            p *= X[i][j]
+        output[i] = 1 if not p else 0
+    return output
+
+# @numba.njit()
+def union_of_neighors(bmus, neighbors):
+    bool_out = np.zeros(len(bmus))
+    for i in range(len(neighbors)):
+        bool_out +=  (bmus == neighbors[i])
+    return  bool_out
+
+# @numba.njit(fastmath=True)
+def get_fast_knn(X_pc, W_pc, x_k, G):
+    print('getting knns')
+    # knn_cvs, _ = get_knn(X_pc, W_pc, cv_k)
+    closest_cvs, _ = get_closest_for_inputs(X_pc, W_pc)
+    knns = np.zeros((X_pc.shape[0], x_k))
+    knn_dists = np.zeros(knns.shape, dtype=np.float32)
+    for i in range(X_pc.shape[0]):
+        G_neis = G[closest_cvs[i]] + G.T[closest_cvs[i]]
+
+        # contains = has_zero(knn_cvs - knn_cvs[i][0])
+        contains = union_of_neighors(closest_cvs, np.where(G_neis)[0])
+        contains[closest_cvs[i]] = 1
+        candidates = np.where(contains)[0]
+        knn_entry, dists = get_fast_pairwise(X_pc[i].reshape(1, X_pc.shape[1]), X_pc[candidates], x_k)
+
+        knns[i] = candidates[knn_entry[0]]
+        knn_dists[i] = dists[0]#[knn_entry[0]]
+
+    values = np.zeros(X_pc.shape[0] * x_k, dtype = np.float32)
+    rows = np.zeros(X_pc.shape[0] * x_k, dtype = np.int32)
+    cols = np.zeros(X_pc.shape[0] * x_k, dtype = np.int32)
+
+    for i in range(knns.shape[0]):
+        start_ix = i * x_k
+        end_ix = (i+1)  * x_k
+
+        values[start_ix:end_ix] = knn_dists[i]/knn_dists[i][-1]
+        rows[start_ix:end_ix] = np.ones(x_k) * i
+        cols[start_ix:end_ix] = knns[i]
+
+
+    return values, rows, cols
 
 @numba.njit('f4(f4,f4)', fastmath=True, )
 def positive_clip(x, v):
