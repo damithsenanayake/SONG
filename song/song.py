@@ -362,26 +362,7 @@ class SONG(BaseEstimator):
 
         Y = output
         if self.dispersion_method == 'UMAP':
-            # ''' This step is needed to synchronize with UMAP dispersion'''
-            # self.Y_loc = Y.min(axis=0)
-            # self.Y_scale = Y.max(axis=0) - Y.min(axis=0)
-            # Y_init = 10 * (Y - self.Y_loc) / self.Y_scale
-            # if Y.shape[0] == 1:
-            #     if self.disp_model == None:
-            #         raise ValueError('Please ensure that your input is larger than 1 vector')
-            #     else:
-            #         x_pc = X_pc
-            #         output = self.disp_model.fit_transform(x_pc)
-            #         output = ((output) * (self.Y_scale) / 10.) + self.Y_loc
-            #
-            # else:
-            #     self.disp_model = UMAP(learning_rate=self.um_lr, n_components=self.dim, n_epochs=self.um_epochs, init=Y_init, min_dist=self.um_min_dist)
-            #     if self.verbose:
-            #         print('\nDispersing output using UMAP...')
-            #     output = self.disp_model.fit_transform(X_pc)
-            #     output = ((output) * (self.Y_scale) / 10.) + self.Y_loc
-            # if self.verbose:
-            #     print('\nUMAP dispersion finished!')
+
             output = self.get_umap_dispersion(Y, X_pc.astype(np.float32), W_pc.astype(np.float32))
 
         return output
@@ -394,7 +375,7 @@ class SONG(BaseEstimator):
         epochs_per_sample = np.exp(-values) * 5
         if self.verbose:
             print('optimizing layout')
-        Y = optimize_layout_euclidean(Y_init, Y_init.copy(), rows, cols, 25, X_pc.shape[0], epochs_per_sample, self.alpha, self.beta, self.rng_state, initial_alpha=0.1)
+        Y = optimize_layout_euclidean(Y_init, Y_init.copy(), rows, cols, 11, X_pc.shape[0], epochs_per_sample, self.alpha, self.beta, self.rng_state, initial_alpha=0.1)
 
         return Y
 
