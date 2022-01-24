@@ -17,7 +17,7 @@ INT32_MAX = np.iinfo(np.int32).max - 1
 class SONG(BaseEstimator):
 
     def __init__(self, n_components=2, n_neighbors=1,
-                 lr=1., gamma=None, so_steps = None,
+                 lr=1., gamma=None, so_steps = None, mutable_graph = True,
                  spread_factor=0.9,
                  spread=1., min_dist=0.1, ns_rate=5,
                  agility=1., verbose=0,
@@ -108,6 +108,7 @@ class SONG(BaseEstimator):
         self.chunk_size = chunk_size
         self.pca = None
         self.pc_components = pc_components
+        self.mutable_graph = mutable_graph
 
         if not sampled_batches is None:
             self.sampled_batches = sampled_batches
@@ -257,7 +258,7 @@ class SONG(BaseEstimator):
                 non_growing_iter = 0
                 shp = np.arange(G.shape[0]).astype(np.int32)
 
-                if self.prototypes >= G.shape[0] and i > 0:
+                if self.mutable_graph and self.prototypes >= G.shape[0] and i > 0:
                     ''' Growing of new coding vectors and low-dimensional vectors '''
                     W, G, Y, E_q = bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y)
 
@@ -362,7 +363,7 @@ class SONG(BaseEstimator):
 
         Y = output
         if self.dispersion_method == 'UMAP':
-
+            Y += self.random_state.random_sample(Y.shape) * 0.001
             output = self.get_umap_dispersion(Y, X_pc.astype(np.float32), W_pc.astype(np.float32))
 
         return output
@@ -370,13 +371,13 @@ class SONG(BaseEstimator):
     def get_umap_dispersion(self, Y_init, X_pc, W_pc):
         if self.verbose:
             print('constructing graph')
-        values, rows, cols = get_fast_knn(X_pc,  W_pc, 10, self.G)
-
-        epochs_per_sample = np.exp(-values) * 5
-        if self.verbose:
-            print('optimizing layout')
-        Y = optimize_layout_euclidean(Y_init, Y_init.copy(), rows, cols, 11, X_pc.shape[0], epochs_per_sample, self.alpha, self.beta, self.rng_state, initial_alpha=0.1)
-
+        # values, rows, cols = get_fast_knn(X_pc,  W_pc, 15, self.G)
+        #
+        # epochs_per_sample = np.exp(-values) * 10
+        # if self.verbose:
+        #     print('optimizing layout')
+        # Y = optimize_layout_euclidean(Y_init, Y_init.copy(), rows, cols, 20, X_pc.shape[0], epochs_per_sample, self.alpha, self.beta, self.rng_state, initial_alpha=0.01)
+        Y = UMAP(init=Y_init, min_dist=self.min_dist, n_components= self.dim, spread= self.spread, learning_rate=0.01, n_epochs=11).fit_transform(X_pc)
         return Y
 
 

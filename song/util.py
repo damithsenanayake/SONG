@@ -1,6 +1,7 @@
 import numba
 import numpy as np
 from scipy.optimize import curve_fit
+from pynndescent import NNDescent
 
 
 @numba.njit("i4(i8[:])")
@@ -85,6 +86,8 @@ def sq_eucl_opt(A, B):
 
     return C
 
+
+
 @numba.njit(fastmath=True)
 def get_closest_for_inputs(X, W):
     min_dist_args = np.zeros(X.shape[0], dtype=np.int64)#
@@ -106,7 +109,7 @@ def get_closest_for_inputs(X, W):
 @numba.njit(fastmath=True)
 def get_fast_pairwise(X, W, k):
     min_dist_args = np.zeros((X.shape[0], k), dtype=np.int64)  #
-    min_dists = np.zeros((X.shape[0],k), dtype=np.int64)
+    min_dists = np.zeros((X.shape[0],k), dtype=np.float32)
     batch_len = 5000
 
     for b in range(len(X) // batch_len + 1):
@@ -120,42 +123,58 @@ def get_fast_pairwise(X, W, k):
 
 
 
-@numba.njit(fastmath=True)
-def union_of_neighors(bmus, neighbors):
-    bool_out = np.zeros(len(bmus))
-    for i in range(len(neighbors)):
-        bool_out +=  (bmus == neighbors[i])
-    return  bool_out
 
-@numba.njit(fastmath=True)
+
+# @numba.njit(fastmath=True)
+def get_reverse_index(bmus, g_size):
+    index = [[] for _ in range(g_size)]
+    for i in range(len(bmus)):
+        index[bmus[i]].append(i)
+    return index
+
+# @numba.jit(fastmath=True)
+def combine_neighbors(index, neighbors):
+    candidates = []
+
+    for i in range(len(neighbors)):
+        candidates.extend(index[neighbors[i]])
+    return np.array(candidates)
+
+def get_neighbor_lists(G):
+    shp = np.arange(G.shape[0])
+
+    neighbor_tree = []#[[] for _ in range(len(G))]
+
+    for i in range(len(G)):
+        bix = np.logical_or(G[i] == 1 , G.T[i] == 1)
+        neighbor_tree.append(shp[bix])
+    return neighbor_tree
+
+# @numba.njit(fastmath=True)
 def get_fast_knn(X_pc, W_pc, x_k, G):
     print('getting knns')
     closest_cvs, _ = get_closest_for_inputs(X_pc, W_pc)
+    reverse_index = get_reverse_index(closest_cvs, G.shape[0])
     knns = np.zeros((X_pc.shape[0], x_k))
     knn_dists = np.zeros(knns.shape, dtype=np.float32)
     values = np.zeros(X_pc.shape[0] * x_k, dtype=np.float32)
     rows = np.zeros(X_pc.shape[0] * x_k, dtype=np.int32)
     cols = np.zeros(X_pc.shape[0] * x_k, dtype=np.int32)
-    shp = np.arange(X_pc.shape[0])
+    X_r = X_pc.reshape(X_pc.shape[0], 1, X_pc.shape[1])
+    neighbor_tree = get_neighbor_lists(G)
     for i in range(X_pc.shape[0]):
-        G_neis = G[closest_cvs[i]]
-        contains = union_of_neighors(closest_cvs, np.where(G_neis)[0])
-        contains[closest_cvs[i]] = 1
-        candidates = shp[contains>0]
-        knn_entry, dists = get_fast_pairwise(X_pc[i].reshape(1, X_pc.shape[1]), X_pc[candidates], x_k)
-
+        # G_neis = G[closest_cvs[i]]
+        neighbors = neighbor_tree[closest_cvs[i]]
+        candidates = combine_neighbors(reverse_index, neighbors)
+        knn_entry, dists = get_fast_pairwise(X_r[i], X_pc[candidates], x_k)
         knns[i] = candidates[knn_entry[0]]
-        knn_dists[i] = dists[0]#[knn_entry[0]]
-
-
-    # for i in range(knns.shape[0]):
+        knn_dists[i] = dists[0]
         start_ix = i * x_k
         end_ix = (i+1)  * x_k
 
-        values[start_ix:end_ix] = knn_dists[i]/knn_dists[i][-1]
+        values[start_ix:end_ix] = knn_dists[i]/(knn_dists[i][-1]+0.0001)
         rows[start_ix:end_ix] = np.ones(x_k) * i
         cols[start_ix:end_ix] = knns[i]
-
 
     return values, rows, cols
 
