@@ -106,7 +106,7 @@ class SONG(BaseEstimator):
         self.um_epochs = um_epochs
         self.um_min_dist = um_min_dist
         self.chunk_size = chunk_size
-        self.pca = None
+        self.pca = [None, None]
         self.pc_components = pc_components
         self.mutable_graph = mutable_graph
 
@@ -118,12 +118,12 @@ class SONG(BaseEstimator):
     def __repr__(self):
         return f'SONG model: n(coding vectors) = {self.W.shape[0]}, n(dimensions) = {self.W.shape[1]}, n(components) = {self.Y.shape[1]}' if self.trained else f'untrained SONG model'
 
-    def _train_pca(self, X):
+    def _train_pca(self, X, ix):
 
-        self.pca = PCA(n_components=np.min([self.pc_components, X.shape[0], X.shape[1]]), random_state = self.random_seed)
-        self.pca.fit(X.toarray() if issparse(X) else X)
+        self.pca[ix] = PCA(n_components=np.min([self.pc_components, X.shape[0], X.shape[1]]), random_state = self.random_seed)
+        self.pca[ix].fit(X.toarray() if issparse(X) else X)
 
-    def _get_XPCA(self, X):
+    def _get_XPCA(self, X, ix):
         nc = np.min([self.pc_components, X.shape[0], X.shape[1]])
         X_pca = np.zeros((X.shape[0], nc))
         chunk_size = 5000
@@ -136,11 +136,11 @@ class SONG(BaseEstimator):
 
                 X_c = X[st:et].toarray()
                 if X_c.shape[0]:
-                    X_pca[st:et] = self.pca.transform(X_c)
+                    X_pca[st:et] = self.pca[ix].transform(X_c)
 
         else:
 
-            X_pca = self.pca.transform(X)
+            X_pca = self.pca[ix].transform(X)
 
         return X_pca
 
@@ -151,35 +151,36 @@ class SONG(BaseEstimator):
         same order
         :return: Y : The Mapped Coordinates in the desired output space (default = 2 ).
         '''
-        X = X.astype(np.float32)
+        X[0] = X[0].astype(np.float32)
+        X[1] = X[1].astype(np.float32)
+        X_PCA = [None, None]
 
-        if reduction == 'PCA' and X.shape[1] > self.pc_components:
-            if not corrected_PC.shape[0]:
-                if self.verbose:
-                    print('Fitting Reduction for Neighborhood Function Calculation')
-                self._train_pca(X[self.random_state.permutation(X.shape[0])[:10000]])
+        for set_ix in range(2):
+            if reduction == 'PCA' and X[set_ix].shape[1] > self.pc_components:
+                if not corrected_PC.shape[0]:
+                    if self.verbose:
+                        print('Fitting Reduction for Neighborhood Function Calculation')
+                    self._train_pca(X[set_ix][self.random_state.permutation(X[set_ix].shape[0])[:10000]], set_ix)
 
-                if self.verbose:
-                    print ('reduction model fitted!')
-            if not corrected_PC.shape[0]:
+                    if self.verbose:
+                        print ('reduction model fitted!')
+                if not corrected_PC.shape[0]:
 
-                X_PCA = self._get_XPCA(X)
+                    X_PCA[set_ix] = self._get_XPCA(X[set_ix], set_ix)
+                else:
+                    X_PCA[set_ix] = corrected_PC
             else:
-                X_PCA = corrected_PC
-        else:
-            X_PCA = X
+                X_PCA[set_ix] = X[set_ix]
+
+
         verbose = self.verbose
-        sparse = issparse(X)
         min_dist = self.min_dist
         spread = self.spread
 
         min_batch = 1000 if not self.sampled_batches else 10000
 
-        if self.ss is None:
-            if X.shape[0] < 100000 or not self.sampled_batches:
-                self.ss = 100#(20 if X.shape[0] > 100000 else 20)
-            else:
-                self.ss = X.shape[0] // min_batch + 10
+
+
         self.max_its = self.ss * self.non_so_rate
 
         if self.alpha is None and self.beta is None:
@@ -209,6 +210,14 @@ class SONG(BaseEstimator):
 
         im_neix = self.dim + self.n_neighbors
 
+
+
+        sparse = issparse(X)
+        if self.ss is None:
+            if X[0].shape[0] < 100000 or not self.sampled_batches:
+                self.ss = 100  # (20 if X.shape[0] > 100000 else 20)
+            else:
+                self.ss = X[0].shape[0] // min_batch + 10
         if self.trained:
             ''' When reusing a trained model, this block will be executed.'''
             W = self.W
@@ -222,37 +231,53 @@ class SONG(BaseEstimator):
         else:
             ''' If the model is not already initialized ...'''
             init_size = im_neix
-            W = X[self.random_state.choice(X.shape[0], init_size)] + self.random_state.random_sample(
-                (init_size, X.shape[1])).astype(np.float32) * 0.0001
+            W = [None, None]
+            E_q = [None, None]
+
             Y = self.random_state.random_sample((init_size, self.dim)).astype(np.float32)
             if verbose:
                 print('random map initialization')
                 print('Stopping at {} prototypes'.format(self.prototypes))
 
             ''' Initialize Graph Adjacency and Weight Matrices '''
-            G = np.identity(W.shape[0]).astype(np.float32)
-            E_q = np.zeros(W.shape[0]).astype(np.float32)
+            G = np.identity(W[0].shape[0]).astype(np.float32)
+            for set_ix in range(2):
+                W[set_ix] = X[set_ix][self.random_state.choice(X[set_ix].shape[0],
+                                                               init_size)] + self.random_state.random_sample(
+                    (init_size, X[set_ix].shape[1])).astype(np.float32) * 0.0001
+                E_q[set_ix] = np.zeros(W[set_ix].shape[0]).astype(np.float32)
 
-        lrst = self.lrst
-
-        presented_len = X.shape[0]
+        order = [None, None]
+        presented_len = [None, None]
+        sratios = [None, None]
+        batch_sizes = [None, None]
+        soeds = np.arange(self.ss)
         soed = 0
         lrdec = 1.
-        soeds = np.arange(self.ss)
-        sratios = ((soeds) * 1. / (self.ss - 1))
+        lrst = self.lrst
 
-        batch_sizes = (X.shape[0] - min_batch) * ((sratios * 0) if self.low_memory else sratios ** (100) ) + min_batch
+        for set_ix in range(2):
+            order[set_ix] = self.random_state.permutation(X[set_ix].shape[0])
+            presented_len[set_ix] = X[set_ix].shape[0]
+            sratios[set_ix] = ((soeds) * 1. / (self.ss - 1))
+
+            batch_sizes[set_ix] = (X[set_ix].shape[0] - min_batch) * (
+                    (sratios[set_ix] * 0) if self.low_memory else sratios[set_ix] ** (100)) + min_batch
+
+
         epsilon = self.epsilon
         lr_sigma = np.float32(5)
         drifters = np.array([])
-        order = self.random_state.permutation(X.shape[0])
+
+
         for i in range(self.max_its):
-            order = self.random_state.permutation(X.shape[0]) if not self.sampled_batches else order
+            set_ix = i%2
+            order = self.random_state.permutation(X[set_ix].shape[0]) if not self.sampled_batches else order
             if not i % self.non_so_rate:
-                presented_len = int(batch_sizes[soed]) if not self.sampled_batches else min_batch
+                presented_len = int(batch_sizes[set_ix][soed]) if not self.sampled_batches else min_batch
                 soed += 1
-            X_presented = X[order[:presented_len]] if not self.sampled_batches else X[(presented_len * i)%X.shape[0] : min((presented_len * i)%X.shape[0]+presented_len, X.shape[0])].astype(np.float32)
-            X_presented_pc = X_PCA[order[:presented_len]] if not self.sampled_batches else X_PCA[(presented_len * i)%X.shape[0] : min((presented_len * i)%X.shape[0]+presented_len, X.shape[0])].astype(np.float32)
+            X_presented = X[set_ix][order[:presented_len]] if not self.sampled_batches else X[set_ix][(presented_len * i)%X[set_ix].shape[0] : min((presented_len * i)%X[set_ix].shape[0]+presented_len, X[set_ix].shape[0])].astype(np.float32)
+            X_presented_pc = X_PCA[set_ix][order[:presented_len]] if not self.sampled_batches else X_PCA[set_ix][(presented_len * i)%X[set_ix].shape[0] : min((presented_len * i)%X[set_ix].shape[0]+presented_len, X[set_ix].shape[0])].astype(np.float32)
 
             if not i % self.non_so_rate:
                 non_growing_iter = 0
@@ -260,17 +285,18 @@ class SONG(BaseEstimator):
 
                 if self.mutable_graph and self.prototypes >= G.shape[0] and i > 0:
                     ''' Growing of new coding vectors and low-dimensional vectors '''
-                    W, G, Y, E_q = bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y)
-
+                    W_ret, G, Y, E_q_ret = bulk_grow_with_drifters(shp, E_q[set_ix], thresh_g, drifters, G, W[set_ix], Y)
+                    W[set_ix] = W_ret
+                    E_q[set_ix] = E_q_ret
                 '''shp is an index set used for optimizing search operations'''
                 shp = np.arange(G.shape[0], dtype=np.int32)
 
                 chunk_size =  self.chunk_size if i else 100
                 n_chunks = X_presented.shape[0]//chunk_size + 1
-                if reduction == 'PCA' and X.shape[1] > 100:
-                    W_ = self.pca.transform(W).astype(np.float32)
+                if reduction == 'PCA' and X[set_ix].shape[1] > 100:
+                    W_ = self.pca[set_ix].transform(W[set_ix]).astype(np.float32)
                 else:
-                    W_ = W
+                    W_ = W[set_ix]
 
                 for chunk in range(n_chunks):
                     chunk_st = chunk * chunk_size
@@ -286,14 +312,15 @@ class SONG(BaseEstimator):
                     pdists = sq_eucl_opt(X_chunk_, W_).astype(np.float32)
                     if verbose:
                         print(f'\r  |G| = {G.shape[0]}, |X| = {X_presented.shape[0]}, epoch = {i+1}/{self.max_its}, Training chunk {chunk + 1} of {n_chunks}', end='')
-                    W, Y, G, E_q = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, lrdec, im_neix,
-                                                         W,
+                    W_ret, Y, G, E_q_ret = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, lrdec, im_neix,
+                                                         W[set_ix],
                                                          self.max_epochs_per_sample, G, epsilon,
                                                          self.min_strength,
                                                          shp, Y,
-                                                         self.ns_rate, alpha, beta, self.rng_state, E_q,
+                                                         self.ns_rate, alpha, beta, self.rng_state, E_q[set_ix],
                                                          lr_sigma, self.reduced_lr)
-
+                    W[set_ix] = W_ret
+                    E_q[set_ix] = E_q_ret
                 drifters = np.where(G.sum(axis=1) == 0)[0]
 
             else:
@@ -326,21 +353,23 @@ class SONG(BaseEstimator):
         return self.transform(X, reduction)
 
     def transform(self, X, reduction = 'PCA', corrected_PC = np.array([])):
-
+        output = [None, None]
         '''Adding a PCA-reduction to speed up the transform process'''
+        min_dist_args, _, X_pc, W_pc = self.get_representatives(X, reduction=reduction, corrected_PC=corrected_PC)
 
-        min_dist_args, _, X_pc, W_pc = self.get_representatives(X, reduction = reduction, corrected_PC = corrected_PC)
+        for set_ix in range(2):
 
-        output = self.Y[min_dist_args]
+            output[set_ix] = self.Y[min_dist_args[set_ix]]
 
-        Y = output
-        if self.dispersion_method == 'UMAP':
-            Y += self.random_state.random_sample(Y.shape) * 0.001
-            output = self.get_umap_dispersion(Y, X_pc.astype(np.float32), W_pc.astype(np.float32))
+            Y = output[set_ix]
+            if self.dispersion_method == 'UMAP':
+                Y += self.random_state.random_sample(Y.shape) * 0.001
+                output[set_ix] = self.get_umap_dispersion(Y, X_pc[set_ix].astype(np.float32), W_pc[set_ix].astype(np.float32))
 
         return output
 
     def get_umap_dispersion(self, Y_init, X_pc, W_pc):
+
         if self.verbose:
             print('constructing graph')
         # values, rows, cols = get_fast_knn(X_pc,  W_pc, 15, self.G)
@@ -356,49 +385,52 @@ class SONG(BaseEstimator):
 
 
     def get_representatives(self, X, reduction = 'PCA', corrected_PC = np.array([])):
+        min_dist_args = [None, None]
+        min_dist_vals = [None, None]
+        X_pc = [None, None]
+        W_pc = [None, None]
+        for set_ix in range(2):
+            min_dist_args[set_ix] = []
+            min_dist_vals[set_ix] = []
+            if reduction == 'PCA' and X.shape[1] > self.pc_components:
 
-        if reduction == 'PCA' and X.shape[1] > self.pc_components:
+                W_pc[set_ix] = self._get_XPCA(self.W[set_ix], set_ix).astype(np.float32)
+                if not corrected_PC.shape[0]:
+                    X_pc[set_ix] = self._get_XPCA(X[set_ix], set_ix )
+                else:
+                    X_pc[set_ix] = corrected_PC
+                if len(X_pc[set_ix].shape) == 1:
+                    X_pc[set_ix] = np.array([X_pc[set_ix]])
 
-            W_pc = self._get_XPCA(self.W).astype(np.float32)
-            if not corrected_PC.shape[0]:
-                X_pc = self._get_XPCA(X)
+
+                chunk = 1000
+                n_chunks = X[set_ix].shape[0] // chunk + 1
+                for i in range(n_chunks):
+                    if self.verbose:
+                        print(f'\rgetting PC of chunk {i+1}/{n_chunks}', end='')
+                    X_b = X_pc[set_ix][i * chunk: (i + 1) * chunk]
+
+                    min_dist_pos, min_dist_val = get_closest_for_inputs(np.float32(X_b), W_pc[set_ix])
+
+                    min_dist_args[set_ix].extend(list(min_dist_pos))
+                    min_dist_vals[set_ix].extend(list(min_dist_val))
+                if self.verbose:
+                    print('')
             else:
-                X_pc = corrected_PC
-            if len(X_pc.shape) == 1:
-                X_pc = np.array([X_pc])
+                X_pc[set_ix] = X[set_ix]
+                W_pc[set_ix] = self.W[set_ix]
+                if len(X[set_ix].shape) == 1:
+                    X = np.array([X[set_ix]])
 
-            min_dist_args = []
-            min_dist_vals = []
-            chunk = 1000
-            n_chunks = X.shape[0] // chunk + 1
-            for i in range(n_chunks):
+                chunk = 1000
+                n_chunks = X[set_ix].shape[0] // chunk + 1
+                for i in range(n_chunks):
+                    if self.verbose:
+                        print(f'\rgetting PC of chunk {i+1}/{n_chunks}', end='')
+                    X_b = X[set_ix][i * chunk: (i + 1) * chunk].toarray() if issparse(X[set_ix]) else X[set_ix][i * chunk: (i + 1) * chunk]
+                    min_dist_pos, min_dist_val = get_closest_for_inputs(np.float32(X_b), self.W[set_ix])
+                    min_dist_args.extend(list(min_dist_pos))
+                    min_dist_vals.extend(list(min_dist_val))
                 if self.verbose:
-                    print(f'\rgetting PC of chunk {i+1}/{n_chunks}', end='')
-                X_b = X_pc[i * chunk: (i + 1) * chunk]
-
-                min_dist_pos, min_dist_val = get_closest_for_inputs(np.float32(X_b), W_pc)
-
-                min_dist_args.extend(list(min_dist_pos))
-                min_dist_vals.extend(list(min_dist_val))
-            if self.verbose:
-                print('')
-        else:
-            X_pc = X
-            W_pc = self.W
-            if len(X.shape) == 1:
-                X = np.array([X])
-            min_dist_args = []
-            min_dist_vals = []
-
-            chunk = 1000
-            n_chunks = X.shape[0] // chunk + 1
-            for i in range(n_chunks):
-                if self.verbose:
-                    print(f'\rgetting PC of chunk {i+1}/{n_chunks}', end='')
-                X_b = X[i * chunk: (i + 1) * chunk].toarray() if issparse(X) else X[i * chunk: (i + 1) * chunk]
-                min_dist_pos, min_dist_val = get_closest_for_inputs(np.float32(X_b), self.W)
-                min_dist_args.extend(list(min_dist_pos))
-                min_dist_vals.extend(list(min_dist_val))
-            if self.verbose:
-                print('')
+                    print('')
         return min_dist_args, min_dist_vals, X_pc, W_pc
