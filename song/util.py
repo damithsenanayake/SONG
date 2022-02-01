@@ -275,7 +275,85 @@ def bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y):
 
     return W, G, Y, E_q
 
+# @numba.njit(fastmath = True)
+def bulk_grow_with_drifters_duplex(shp, E_q , set_ix, thresh_g, drifters, G, W_0, W_1, Y):
+    growth_size = max(0, len(shp[E_q[set_ix] >= thresh_g]) - len(drifters))
 
+    if growth_size:
+        oldG = G
+        oldW_0 = W_0
+        oldW_1 = W_1
+        oldY = Y
+        oldE = E_q
+        old_size = oldW_0.shape[0]
+        W_0 = np.zeros((W_0.shape[0] + growth_size, W_0.shape[1]), dtype=np.float32)
+        W_0[:-growth_size] = oldW_0
+        W_1 = np.zeros((W_1.shape[0] + growth_size, W_1.shape[1]), dtype=np.float32)
+        W_1[:-growth_size] = oldW_1
+
+        Y = np.zeros((Y.shape[0] + growth_size, Y.shape[1]), dtype=np.float32)
+        Y[: -growth_size] = oldY
+
+        G = np.zeros((G.shape[0] + growth_size, G.shape[1] + growth_size), dtype=np.float32)
+        G[:-growth_size][:, :-growth_size] = oldG
+
+        E_q_0 = np.zeros(E_q[0].shape[0] + growth_size, dtype=np.float32)
+        E_q_0[:-growth_size] = oldE[0]
+        E_q_1 = np.zeros(E_q[1].shape[0] + growth_size, dtype=np.float32)
+        E_q_1[:-growth_size] = oldE[1]
+
+        grown = 0
+        growing_nodes = shp[oldE[set_ix] >= thresh_g]
+
+        shp = np.arange(G.shape[0]).astype(np.int32)
+
+        if len(growing_nodes) >= 1:
+            for k in range(len(growing_nodes)):
+                b = growing_nodes[k]
+                ''' If no reusable nodes create new nodes'''
+                closests = shp[G[b] == 1]
+                if len(closests) == 0:
+                    drifters = np.append(drifters, b)
+                    continue
+                h_bias = 1e-1
+                l_bias = 1e-8
+                W_n_0 = (1-h_bias) * W_0[b] + h_bias * (W_0[closests].sum(axis=0) / len(closests))
+                W_n_1 = (1-h_bias) * W_1[b] + h_bias * (W_1[closests].sum(axis=0) / len(closests))
+
+                Y_n = (1-l_bias) * Y[b] + l_bias * (Y[closests].sum(axis=0) / len(closests))
+                if grown >= len(drifters):
+                    W_0[old_size + grown - len(drifters)] = W_n_0
+                    W_1[old_size + grown - len(drifters)] = W_n_1
+
+                    Y[old_size + grown - len(drifters)] = Y_n
+                    ''' connect neighbors to the new node '''
+                    G[old_size + grown - len(drifters)][b] = 1
+                    G[b][old_size + grown - len(drifters)] = 0
+                    G[old_size + grown - len(drifters)][closests] = 1
+                    G[closests][:, old_size + grown - len(drifters)] = 0
+
+                    ''' Append new error. '''
+                    E_q_0[old_size + grown - len(drifters)] = 0
+                    E_q_1[old_size + grown - len(drifters)] = 0
+
+                else:
+                    '''replace unusable nodes with new nodes'''
+                    W_0[drifters[grown]] = W_n_0
+                    W_1[drifters[grown]] = W_n_1
+
+                    Y[drifters[grown]] = Y_n
+                    G[drifters[grown]][b] = 1
+                    G[b][drifters[grown]] = 0
+                    G[drifters[grown]][closests] = 1
+                    G[closests][:, drifters[grown]] = 0
+                G[b][closests] = 0
+                G[closests][:, b] = 0
+                E_q_0[closests] *= 0.
+                E_q_1[closests] *= 0.
+
+                grown += 1
+            E_q = np.array([E_q_0, E_q_1])
+    return W_0, W_1, G, Y, E_q
 
 @numba.njit('f4(f4, f4)', fastmath=True)
 def get_so_rate(tau, sigma):

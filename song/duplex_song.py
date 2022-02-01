@@ -7,7 +7,7 @@ from umap.umap_ import optimize_layout_euclidean
 from scipy.sparse import coo_matrix
 
 from song.util import find_spread_tightness, \
-    bulk_grow_with_drifters, embed_batch_epochs, \
+    bulk_grow_with_drifters_duplex, embed_batch_epochs, \
     train_for_batch_batch, sq_eucl_opt, get_closest_for_inputs, get_fast_knn
 
 INT32_MIN = np.iinfo(np.int32).min + 1
@@ -181,7 +181,6 @@ class SONG(BaseEstimator):
 
 
 
-        self.max_its = self.ss * self.non_so_rate
 
         if self.alpha is None and self.beta is None:
             alpha, beta = find_spread_tightness(spread, min_dist)
@@ -195,15 +194,13 @@ class SONG(BaseEstimator):
         if self.sf is None:
             self.sf = np.log(4) / (2 * self.ss)
 
-        error_scale = np.median(np.linalg.norm(X-X.mean(axis=0) if not (reduction == 'PCA') else X_PCA-X_PCA.mean(axis=0), axis=1))**2
-        thresh_g = -(X.shape[1]) if not (reduction=='PCA') else -(X_PCA.shape[1]) * np.log(self.sf) * error_scale
 
         so_lr_st = self.lrst
         if self.prototypes is None:
             if not self.fvc is None:
                 self.prototypes = self.fvc
             else:
-                self.prototypes = int(np.exp(np.log(X.shape[0]) / 1.5))
+                self.prototypes = int(np.exp(np.log(min(X[0].shape[0], X[1].shape[0])) / 1.5))
         ''' Initialize coding vector weights and output coordinate system  '''
         ''' index of the last nearest neighbor : depends on output dimensionality. Higher the output dimensionality, 
                        higher the connectedness '''
@@ -212,12 +209,15 @@ class SONG(BaseEstimator):
 
 
 
-        sparse = issparse(X)
         if self.ss is None:
             if X[0].shape[0] < 100000 or not self.sampled_batches:
                 self.ss = 100  # (20 if X.shape[0] > 100000 else 20)
             else:
-                self.ss = X[0].shape[0] // min_batch + 10
+                self.ss = X[0].shape[0] // min_batch + 1
+
+
+        self.max_its = self.ss * self.non_so_rate
+
         if self.trained:
             ''' When reusing a trained model, this block will be executed.'''
             W = self.W
@@ -240,12 +240,12 @@ class SONG(BaseEstimator):
                 print('Stopping at {} prototypes'.format(self.prototypes))
 
             ''' Initialize Graph Adjacency and Weight Matrices '''
-            G = np.identity(W[0].shape[0]).astype(np.float32)
             for set_ix in range(2):
                 W[set_ix] = X[set_ix][self.random_state.choice(X[set_ix].shape[0],
                                                                init_size)] + self.random_state.random_sample(
                     (init_size, X[set_ix].shape[1])).astype(np.float32) * 0.0001
                 E_q[set_ix] = np.zeros(W[set_ix].shape[0]).astype(np.float32)
+            G = np.identity(W[0].shape[0]).astype(np.float32)
 
         order = [None, None]
         presented_len = [None, None]
@@ -257,6 +257,12 @@ class SONG(BaseEstimator):
         lrst = self.lrst
 
         for set_ix in range(2):
+            error_scale = np.median(np.linalg.norm(
+                X - X.mean(axis=0) if not (reduction == 'PCA') else X_PCA[set_ix] - X_PCA[set_ix].mean(axis=0),
+                axis=1)) ** 2
+            thresh_g = -(X[set_ix].shape[1]) if not (reduction == 'PCA') else -(X_PCA[set_ix].shape[1]) * np.log(
+                self.sf) * error_scale
+
             order[set_ix] = self.random_state.permutation(X[set_ix].shape[0])
             presented_len[set_ix] = X[set_ix].shape[0]
             sratios[set_ix] = ((soeds) * 1. / (self.ss - 1))
@@ -272,6 +278,8 @@ class SONG(BaseEstimator):
 
         for i in range(self.max_its):
             set_ix = i%2
+            sparse = issparse(X[set_ix])
+
             order = self.random_state.permutation(X[set_ix].shape[0]) if not self.sampled_batches else order
             if not i % self.non_so_rate:
                 presented_len = int(batch_sizes[set_ix][soed]) if not self.sampled_batches else min_batch
@@ -285,9 +293,11 @@ class SONG(BaseEstimator):
 
                 if self.mutable_graph and self.prototypes >= G.shape[0] and i > 0:
                     ''' Growing of new coding vectors and low-dimensional vectors '''
-                    W_ret, G, Y, E_q_ret = bulk_grow_with_drifters(shp, E_q[set_ix], thresh_g, drifters, G, W[set_ix], Y)
-                    W[set_ix] = W_ret
-                    E_q[set_ix] = E_q_ret
+                    W_ret_0, W_ret_1, G, Y, E_q_ret = bulk_grow_with_drifters_duplex(shp, np.array(E_q), set_ix, thresh_g, drifters, G, W[0], W[1], Y)
+                    W[0] = W_ret_0
+                    W[1] = W_ret_1
+                    E_q[0] = E_q_ret[0]
+                    E_q[1] = E_q_ret[1]
                 '''shp is an index set used for optimizing search operations'''
                 shp = np.arange(G.shape[0], dtype=np.int32)
 
@@ -392,7 +402,7 @@ class SONG(BaseEstimator):
         for set_ix in range(2):
             min_dist_args[set_ix] = []
             min_dist_vals[set_ix] = []
-            if reduction == 'PCA' and X.shape[1] > self.pc_components:
+            if reduction == 'PCA' and X[set_ix].shape[1] > self.pc_components:
 
                 W_pc[set_ix] = self._get_XPCA(self.W[set_ix], set_ix).astype(np.float32)
                 if not corrected_PC.shape[0]:
