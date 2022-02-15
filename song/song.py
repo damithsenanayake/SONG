@@ -349,10 +349,14 @@ class SONG(BaseEstimator):
         # if self.verbose:
         #     print('optimizing layout')
         # Y = optimize_layout_euclidean(Y_init, Y_init.copy(), rows, cols, 20, X_pc.shape[0], epochs_per_sample, self.alpha, self.beta, self.rng_state, initial_alpha=0.01)
-        Y = UMAP(init=Y_init, min_dist=self.min_dist, n_components= self.dim, spread= self.spread, learning_rate=0.01, n_epochs=11).fit_transform(X_pc)
+        self.Y_loc = Y_init.min(axis=0)
+        self.Y_scale = Y_init.max(axis=0) - self.Y_loc
+
+        Y = UMAP(init=Y_init, min_dist=self.min_dist, n_components=self.dim, spread=self.spread, learning_rate=0.01,
+                 n_epochs=11).fit_transform(X_pc)
         if self.verbose:
             print('transformation done...')
-        return Y
+        return (Y * self.Y_scale / 10.) + self.Y_loc
 
 
     def get_representatives(self, X, reduction = 'PCA', corrected_PC = np.array([])):
