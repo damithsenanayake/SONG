@@ -107,6 +107,7 @@ class SONG(BaseEstimator):
         self.um_min_dist = um_min_dist
         self.chunk_size = chunk_size
         self.pca = None
+        self.linear_transform = False
         self.pc_components = pc_components
         self.mutable_graph = mutable_graph
 
@@ -127,20 +128,36 @@ class SONG(BaseEstimator):
         nc = np.min([self.pc_components, X.shape[0], X.shape[1]])
         X_pca = np.zeros((X.shape[0], nc))
         chunk_size = 5000
-        if issparse(X):
-            n_chunks = X.shape[0] // chunk_size + 1
+        if not self.linear_transform:
+            if issparse(X):
+                n_chunks = X.shape[0] // chunk_size + 1
 
-            for i in range(n_chunks):
-                st = i * chunk_size
-                et = (i + 1) * chunk_size
+                for i in range(n_chunks):
+                    st = i * chunk_size
+                    et = (i + 1) * chunk_size
 
-                X_c = X[st:et].toarray()
-                if X_c.shape[0]:
-                    X_pca[st:et] = self.pca.transform(X_c)
+                    X_c = X[st:et].toarray()
+                    if X_c.shape[0]:
+                        X_pca[st:et] = self.pca.transform(X_c)
 
+            else:
+
+                X_pca = self.pca.transform(X)
         else:
+            if issparse(X):
+                n_chunks = X.shape[0] // chunk_size + 1
 
-            X_pca = self.pca.transform(X)
+                for i in range(n_chunks):
+                    st = i * chunk_size
+                    et = (i + 1) * chunk_size
+
+                    X_c = X[st:et].toarray()
+                    if X_c.shape[0]:
+                        X_pca[st:et] = np.dot(X_c, self.pca.components_.T)
+
+            else:
+
+                X_pca = np.dot(X, self.pca.components_.T)
 
         return X_pca
 
@@ -157,7 +174,9 @@ class SONG(BaseEstimator):
             if not corrected_PC.shape[0]:
                 if self.verbose:
                     print('Fitting Reduction for Neighborhood Function Calculation')
-                self._train_pca(X[self.random_state.permutation(X.shape[0])[:10000]])
+
+                if self.pca == None:
+                    self._train_pca(X[self.random_state.permutation(X.shape[0])[:10000]])
 
                 if self.verbose:
                     print ('reduction model fitted!')
@@ -196,6 +215,7 @@ class SONG(BaseEstimator):
 
         error_scale = np.median(np.linalg.norm(X-X.mean(axis=0) if not (reduction == 'PCA') else X_PCA-X_PCA.mean(axis=0), axis=1))**2
         thresh_g = -(X.shape[1]) if not (reduction=='PCA') else -(X_PCA.shape[1]) * np.log(self.sf) * error_scale
+        # thresh_g **= 100
 
         so_lr_st = self.lrst
         if self.prototypes is None:
@@ -268,7 +288,7 @@ class SONG(BaseEstimator):
                 chunk_size =  self.chunk_size if i else 100
                 n_chunks = X_presented.shape[0]//chunk_size + 1
                 if reduction == 'PCA' and X.shape[1] > 100:
-                    W_ = self.pca.transform(W).astype(np.float32)
+                    W_ = self._get_XPCA(W).astype(np.float32)
                 else:
                     W_ = W
 

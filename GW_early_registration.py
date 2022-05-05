@@ -30,12 +30,14 @@ samplesize = 60000
 X = np.array(pd.read_csv('~/data/mnist/mnist_train.csv')).astype(float)
 c1 = X[: samplesize, 0].astype(float)
 X_tr1 = ((X[:samplesize, 1:].astype(np.float32)))
-# X_tr2, c2 = load_digits(10, return_X_y=True)
+X_tr2, c2 = load_digits(10, return_X_y=True)
 
-X_tr2 = X_tr1
-c2 = c1
-
-model = SONG(verbose = 1, final_vector_count=200,  so_steps=50)
+# X_tr2 = X_tr1[:30000]
+# c2 = c1[:30000]
+# X_tr1 = X_tr1[30000:]
+# c1 = c1[30000:]
+print(X_tr1.shape[0], X_tr2.shape[0])
+model = SONG(verbose = 1, final_vector_count=150,  so_steps=50)
 model.fit([X_tr1, X_tr2])
 
 geom_xx = pointcloud.PointCloud(x = model.W[0], y = model.W[0])
@@ -56,7 +58,7 @@ model.W[1] = model.W[1][second_manifold_shift_order]
 # model.G[1] = model.G[1][second_manifold_shift_order][:, second_manifold_shift_order]
 model.ss = 100
 model.lrst=0.05
-model.prototypes = 500
+model.prototypes = 2000
 
 tic = timeit.default_timer()
 
