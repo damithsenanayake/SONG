@@ -16,9 +16,9 @@ INT32_MAX = np.iinfo(np.int32).max - 1
 
 class SONG(BaseEstimator):
 
-    def __init__(self, n_components=2, n_neighbors=1,
+    def __init__(self, n_components=2, n_neighbors=2,
                  lr=1., gamma=None, so_steps = None, mutable_graph = True,
-                 spread_factor=0.9,
+                 spread_factor=0.99999,
                  spread=1., min_dist=0.1, ns_rate=5,
                  agility=1., verbose=0,
                  max_age=3,
@@ -214,7 +214,7 @@ class SONG(BaseEstimator):
             self.sf = np.log(4) / (2 * self.ss)
 
         error_scale = np.median(np.linalg.norm(X-X.mean(axis=0) if not (reduction == 'PCA') else X_PCA-X_PCA.mean(axis=0), axis=1))**2
-        thresh_g = -(X.shape[1]) if not (reduction=='PCA') else -(X_PCA.shape[1]) * np.log(self.sf) * error_scale
+        thresh_g = (-(X.shape[1]) if not (reduction=='PCA') else -(X_PCA.shape[1]) ) * np.log(self.sf)# * error_scale
         # thresh_g **= 100
 
         so_lr_st = self.lrst
