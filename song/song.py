@@ -16,7 +16,7 @@ INT32_MAX = np.iinfo(np.int32).max - 1
 
 class SONG(BaseEstimator):
 
-    def __init__(self, n_components=2, n_neighbors=2,
+    def __init__(self, n_components=2, n_neighbors=1,
                  lr=1., gamma=None, so_steps = None, mutable_graph = True,
                  spread_factor=0.99999,
                  spread=1., min_dist=0.1, ns_rate=5,
@@ -214,7 +214,7 @@ class SONG(BaseEstimator):
             self.sf = np.log(4) / (2 * self.ss)
 
         error_scale = np.median(np.linalg.norm(X-X.mean(axis=0) if not (reduction == 'PCA') else X_PCA-X_PCA.mean(axis=0), axis=1))**2
-        thresh_g = (-(X.shape[1]) if not (reduction=='PCA') else -(X_PCA.shape[1]) ) * np.log(self.sf)# * error_scale
+        thresh_g = (-(X.shape[1]) if not (reduction=='PCA') else -(X_PCA.shape[1]) ) * np.log(self.sf) * error_scale
         # thresh_g **= 100
 
         so_lr_st = self.lrst
@@ -304,6 +304,7 @@ class SONG(BaseEstimator):
                         X_chunk_ = X_chunk
 
                     pdists = sq_eucl_opt(X_chunk_, W_).astype(np.float32)
+                    pcvdist = sq_eucl_opt(W_, W_).astype(np.float32)
                     if verbose:
                         print(f'\r  |G| = {G.shape[0]}, |X| = {X_presented.shape[0]}, epoch = {i+1}/{self.max_its}, Training chunk {chunk + 1} of {n_chunks}', end='')
                     W, Y, G, E_q = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, lrdec, im_neix,
@@ -312,7 +313,7 @@ class SONG(BaseEstimator):
                                                          self.min_strength,
                                                          shp, Y,
                                                          self.ns_rate, alpha, beta, self.rng_state, E_q,
-                                                         lr_sigma, self.reduced_lr)
+                                                         lr_sigma, self.reduced_lr, pcvdist)
 
                 drifters = np.where(G.sum(axis=1) == 0)[0]
 

@@ -386,14 +386,13 @@ def get_closest(dists_2, k):
 
 @numba.njit(fastmath=True, )
 def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im_neix, W, max_epochs_per_sample, G, epsilon, min_strength,
-                           shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr):
+                           shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr, pw_cv_dist):
 
 
     taus = ((i * X_presented.shape[0] + np.arange(len(X_presented)).astype(np.float32)) * 1. / (max_its * X_presented.shape[0]))
     lrs = (1-taus)* reduced_lr
     so_lr = lrst * get_so_rate(i * 1. / max_its, lr_sigma)
     nei_len = np.int32(min(im_neix, W.shape[0]))
-
     for k in range(len(X_presented)):
         x = X_presented[k]
         dist_H = pdist_matrix[k]
@@ -419,7 +418,8 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
                                              Y, ns_rate, alpha, beta,
                                              lrs[k], rng_state, epoch_vector.astype(np.int32),
                                              neg_epoch_vector.astype(np.int32))
-        E_q[b] += (dist_H[b]/denom)**400
+
+        E_q[b] +=  (1 - np.exp(- 100 * (dist_H[b]/(100* pw_cv_dist[b, neilist[-1]]))**5 ))*dist_H[b]#+ (1- error_momentum) * E_q[b]
 
     return W, Y, G, E_q
 
