@@ -18,7 +18,7 @@ class SONG(BaseEstimator):
 
     def __init__(self, n_components=2, n_neighbors=1,
                  lr=1., gamma=None, so_steps = None, mutable_graph = True,
-                 spread_factor=0.99999,
+                 spread_factor=0.85,
                  spread=1., min_dist=0.1, ns_rate=5,
                  agility=1., verbose=0,
                  max_age=3,

@@ -419,7 +419,7 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
                                              lrs[k], rng_state, epoch_vector.astype(np.int32),
                                              neg_epoch_vector.astype(np.int32))
 
-        E_q[b] +=  (1 - np.exp(- 100 * (dist_H[b]/(100* pw_cv_dist[b, neilist[-1]]))**5 ))*dist_H[b]#+ (1- error_momentum) * E_q[b]
+        E_q[b] +=  (1 - np.exp(- 5 * (dist_H[b]/(5* pw_cv_dist[b, neilist[-1]]))**2 )) * dist_H[b]#+ (1- error_momentum) * E_q[b]
 
     return W, Y, G, E_q
 
