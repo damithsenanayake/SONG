@@ -18,12 +18,13 @@ class SONG(BaseEstimator):
 
     def __init__(self, n_components=2, n_neighbors=1,
                  lr=1., gamma=None, so_steps = None, mutable_graph = True,
-                 spread_factor=0.85,
+                 spread_factor=0.95,
                  spread=1., min_dist=0.1, ns_rate=5,
                  agility=1., verbose=0,
-                 max_age=3,
+                 max_age=2,
                  random_seed=1, epsilon=.9, a=None, b=None, final_vector_count=None, dispersion_method = 'UMAP',
-                 fvc_growth=0.5, chunk_size = 1000, pc_components = 50, non_so_rate = 0, low_memory = False, sampled_batches = False, um_min_dist = 0.001, um_lr = 0.01, um_epochs = 11):
+                 fvc_growth=0.5, chunk_size = 1000, pc_components = 50, non_so_rate = 0, low_memory = False, sampled_batches = False,
+                 um_min_dist = 0.001, um_lr = 0.01, um_epochs = 11):
 
         ''' Initialize a SONG to reduce data.
 
@@ -213,7 +214,7 @@ class SONG(BaseEstimator):
         if self.sf is None:
             self.sf = np.log(4) / (2 * self.ss)
 
-        error_scale = np.median(np.linalg.norm(X-X.mean(axis=0) if not (reduction == 'PCA') else X_PCA-X_PCA.mean(axis=0), axis=1))**2
+        error_scale = np.median(np.linalg.norm(X-X.mean(axis=0) if not (reduction == 'PCA') else X_PCA-X_PCA.mean(axis=0), axis=1))** 16
         thresh_g = (-(X.shape[1]) if not (reduction=='PCA') else -(X_PCA.shape[1]) ) * np.log(self.sf) * error_scale
         # thresh_g **= 100
 
@@ -373,8 +374,8 @@ class SONG(BaseEstimator):
         self.Y_loc = Y_init.min(axis=0)
         self.Y_scale = Y_init.max(axis=0) - self.Y_loc
 
-        Y = UMAP(init=Y_init, min_dist=self.min_dist, n_components=self.dim, spread=self.spread, learning_rate=0.01,
-                 n_epochs=11).fit_transform(X_pc)
+        Y = UMAP(init=Y_init, min_dist=self.um_min_dist, n_components=self.dim, spread=self.spread, learning_rate=self.um_lr,
+                 n_epochs=self.um_epochs).fit_transform(X_pc)
         if self.verbose:
             print('transformation done...')
         return (Y * self.Y_scale / 10.) + self.Y_loc
