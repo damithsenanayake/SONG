@@ -386,7 +386,7 @@ def get_closest(dists_2, k):
 
 @numba.njit(fastmath=True, )
 def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im_neix, W, max_epochs_per_sample, G, epsilon, min_strength,
-                           shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr, pw_cv_dist):
+                           shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr, cv_pdist):
 
 
     taus = ((i * X_presented.shape[0] + np.arange(len(X_presented)).astype(np.float32)) * 1. / (max_its * X_presented.shape[0]))
@@ -407,7 +407,7 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
         nei_bin = (G[b] + G[:, b]) > 0
         neighbors = shp[nei_bin]
 
-        denom = pw_cv_dist[b, neilist[-1]]
+        denom = cv_pdist[b, neilist[-1]]#dist_H[neilist[-1]]
 
         epoch_vector = max_epochs_per_sample * ((G[b] + G[:, b]) / 2. + 1)
         neg_epoch_vector = ns_rate* (1 - (G[b] + G[:, b]) / 2.) + 1
@@ -419,8 +419,8 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
                                              lrs[k], rng_state, epoch_vector.astype(np.int32),
                                              neg_epoch_vector.astype(np.int32))
 
-        E_q[b] +=  dist_H[b] ** 8#+ (1- error_momentum) * E_q[b]
-
+        E_q[b] +=  dist_H[b] #** 8#+ (1- error_momentum) * E_q[b]
+        # print(dist_H[b]/denom, dist_H, denom)
     return W, Y, G, E_q
 
 
@@ -432,7 +432,7 @@ def train_neighborhood(x, so_lr, b, neighbors, W, hdist_nei, Y, ns_rate, alpha, 
     hdists = hdist_nei
     y_b = Y[b]
     ''' Self Organizing '''
-    sigma = .000005
+    sigma = 1.
     for j in range(W.shape[0]):
         hdist = hdists[j]
 

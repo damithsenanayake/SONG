@@ -214,7 +214,7 @@ class SONG(BaseEstimator):
         if self.sf is None:
             self.sf = np.log(4) / (2 * self.ss)
 
-        error_scale = np.median(np.linalg.norm(X-X.mean(axis=0) if not (reduction == 'PCA') else X_PCA-X_PCA.mean(axis=0), axis=1))** 16
+        error_scale = np.median(np.linalg.norm(X-X.mean(axis=0) if not (reduction == 'PCA') else X_PCA-X_PCA.mean(axis=0), axis=1))#** 16
         thresh_g = (-(X.shape[1]) if not (reduction=='PCA') else -(X_PCA.shape[1]) ) * np.log(self.sf) * error_scale
         # thresh_g **= 100
 
@@ -314,7 +314,7 @@ class SONG(BaseEstimator):
                                                          self.min_strength,
                                                          shp, Y,
                                                          self.ns_rate, alpha, beta, self.rng_state, E_q,
-                                                         lr_sigma, self.reduced_lr, pcvdist)
+                                                         lr_sigma, self.reduced_lr, pdists)
 
                 drifters = np.where(G.sum(axis=1) == 0)[0]
 

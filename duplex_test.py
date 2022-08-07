@@ -26,9 +26,9 @@ def plotgraph2d(ax, W, G):
                 ax.plot([W[i, 0], W[j, 0]], [W[i, 1], W[j, 1]], c='black', linewidth =G[i][j], alpha=0.2)
     return ax
 
-model = SONG(verbose = 1, final_vector_count=100, spread_factor=0.9999999999, so_steps=1000, n_neighbors=1, max_age=1)
+model = SONG(verbose = 1, final_vector_count=500, so_steps=500)
 
-samplesize = 60000
+samplesize = 30000
 X = np.array(pd.read_csv('~/data/mnist/mnist_train.csv')).astype(float)
 c1 = X[: samplesize, 0].astype(float)
 X_tr1 = ((X[:samplesize, 1:].astype(np.float32)))

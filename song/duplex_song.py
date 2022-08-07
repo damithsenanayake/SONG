@@ -18,7 +18,7 @@ class SONG(BaseEstimator):
 
     def __init__(self, n_components=2, n_neighbors=1,
                  lr=1., gamma=None, so_steps = None, mutable_graph = True,
-                 spread_factor=0.9,
+                 spread_factor=0.95,
                  spread=1., min_dist=0.1, ns_rate=5,
                  agility=1., verbose=0,
                  max_age=3,
@@ -156,7 +156,7 @@ class SONG(BaseEstimator):
         X_PCA = [None, None]
 
         for set_ix in range(2):
-            if reduction == 'PCA' and X[set_ix].shape[1] > self.pc_components:
+            if reduction == 'PCA':# and X[set_ix].shape[1] > self.pc_components:
                 if not corrected_PC.shape[0]:
                     if self.verbose:
                         print('Fitting Reduction for Neighborhood Function Calculation')
@@ -303,7 +303,7 @@ class SONG(BaseEstimator):
 
                 chunk_size =  self.chunk_size if i else 100
                 n_chunks = X_presented.shape[0]//chunk_size + 1
-                if reduction == 'PCA' and X[set_ix].shape[1] > 100:
+                if reduction == 'PCA' :# and X[set_ix].shape[1] > self.pc_components:
                     W_ = self.pca[set_ix].transform(W[set_ix]).astype(np.float32)
                 else:
                     W_ = W[set_ix]
@@ -314,12 +314,14 @@ class SONG(BaseEstimator):
                     X_chunk = X_presented[chunk_st:chunk_en].toarray() if sparse else X_presented[chunk_st:chunk_en]
                     if not X_chunk.shape[0]:
                         continue
-                    if reduction == 'PCA':
+                    if reduction == 'PCA' : #and X[set_ix].shape[1] > self.pc_components:
                         X_chunk_ = (X_presented_pc[chunk_st:chunk_en]).astype(np.float32)
                     else:
                         X_chunk_ = X_chunk
 
                     pdists = sq_eucl_opt(X_chunk_, W_).astype(np.float32)
+                    pcvdist = sq_eucl_opt(W_, W_).astype(np.float32)
+
                     if verbose:
                         print(f'\r split ratio: {split_ratio} set:{set_ix},  |G| = {G.shape[0]}, |X| = {X_presented.shape[0]}, epoch = {i+1}/{self.max_its}, Training chunk {chunk + 1} of {n_chunks}', end='')
                     W_ret, Y, G, E_q_ret = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, lrdec, im_neix,
@@ -328,7 +330,7 @@ class SONG(BaseEstimator):
                                                          self.min_strength,
                                                          shp, Y,
                                                          self.ns_rate, alpha, beta, self.rng_state, E_q[set_ix],
-                                                         lr_sigma, self.reduced_lr)
+                                                         lr_sigma, self.reduced_lr, pcvdist)
                     W[set_ix] = W_ret
                     E_q[set_ix] = E_q_ret
                 drifters = np.where(G.sum(axis=1) == 0)[0]
@@ -405,7 +407,7 @@ class SONG(BaseEstimator):
         for set_ix in range(2):
             min_dist_args[set_ix] = []
             min_dist_vals[set_ix] = []
-            if reduction == 'PCA' and X[set_ix].shape[1] > self.pc_components:
+            if reduction == 'PCA' :#and X[set_ix].shape[1] > self.pc_components:
 
                 W_pc[set_ix] = self._get_XPCA(self.W[set_ix], set_ix).astype(np.float32)
                 if not corrected_PC.shape[0]:
@@ -442,8 +444,8 @@ class SONG(BaseEstimator):
                         print(f'\rgetting PC of chunk {i+1}/{n_chunks}', end='')
                     X_b = X[set_ix][i * chunk: (i + 1) * chunk].toarray() if issparse(X[set_ix]) else X[set_ix][i * chunk: (i + 1) * chunk]
                     min_dist_pos, min_dist_val = get_closest_for_inputs(np.float32(X_b), self.W[set_ix])
-                    min_dist_args.extend(list(min_dist_pos))
-                    min_dist_vals.extend(list(min_dist_val))
+                    min_dist_args[set_ix].extend(list(min_dist_pos))
+                    min_dist_vals[set_ix].extend(list(min_dist_val))
                 if self.verbose:
                     print('')
         return min_dist_args, min_dist_vals, X_pc, W_pc

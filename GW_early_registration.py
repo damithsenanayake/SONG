@@ -26,18 +26,19 @@ def plotgraph2d(ax, W, G):
                 ax.plot([W[i, 0], W[j, 0]], [W[i, 1], W[j, 1]], c='black', linewidth =G[i][j], alpha=0.2)
     return ax
 
-samplesize = 60000
+samplesize = 30000
 X = np.array(pd.read_csv('~/data/mnist/mnist_train.csv')).astype(float)
 c1 = X[: samplesize, 0].astype(float)
-X_tr1 = ((X[:samplesize, 1:].astype(np.float32)))
-X_tr2, c2 = load_digits(10, return_X_y=True)
+X_tr1 = PCA(n_components=20).fit_transform((X[:samplesize, 1:].astype(np.float32)))
+X_tr2 = PCA(n_components=40).fit_transform(X[samplesize:, 1:].astype(np.float32))
+c2 = X[samplesize:, 0].astype(float)
 
 # X_tr2 = X_tr1[:30000]
 # c2 = c1[:30000]
 # X_tr1 = X_tr1[30000:]
 # c1 = c1[30000:]
 print(X_tr1.shape[0], X_tr2.shape[0])
-model = SONG(verbose = 1, final_vector_count=150,  so_steps=50)
+model = SONG(verbose = 1, final_vector_count=200, n_neighbors=4,  so_steps=50)
 model.fit([X_tr1, X_tr2])
 
 geom_xx = pointcloud.PointCloud(x = model.W[0], y = model.W[0])
@@ -56,9 +57,9 @@ transport = out.matrix
 second_manifold_shift_order = jnp.array(np.argmax(transport, axis=1))
 model.W[1] = model.W[1][second_manifold_shift_order]
 # model.G[1] = model.G[1][second_manifold_shift_order][:, second_manifold_shift_order]
-model.ss = 100
-model.lrst=0.05
-model.prototypes = 2000
+model.ss = 200
+model.lrst=.001
+model.prototypes = 500
 
 tic = timeit.default_timer()
 
@@ -100,10 +101,10 @@ ax = axes.flatten()[0]
 # ax.scatter(model.Y.T[0], model.Y.T[1], c = colors_swiss_roll, s= 4)
 
 ax = axes.flatten()[0]
-ax.scatter(Y1.T[0], Y1.T[1], c = c1, cmap = plt.cm.Spectral, s= 2)
+ax.scatter(Y1.T[0], Y1.T[1], c = c1, cmap = plt.cm.tab10, s= 2)
 
 
 ax = axes.flatten()[1]
-ax.scatter(Y2.T[0], Y2.T[1], c = c2, cmap = plt.cm.Spectral, s= 2)
+ax.scatter(Y2.T[0], Y2.T[1], c = c2, cmap = plt.cm.tab10, s= 2)
 plt.show()
 
