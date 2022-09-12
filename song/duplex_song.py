@@ -8,7 +8,7 @@ from scipy.sparse import coo_matrix
 
 from song.util import find_spread_tightness, \
     bulk_grow_with_drifters_duplex, embed_batch_epochs, \
-    train_for_batch_batch, sq_eucl_opt, get_closest_for_inputs, get_fast_knn
+    train_for_batch_batch, sq_eucl_opt, get_closest_for_inputs, graph_creation
 
 INT32_MIN = np.iinfo(np.int32).min + 1
 INT32_MAX = np.iinfo(np.int32).max - 1
@@ -21,7 +21,7 @@ class SONG(BaseEstimator):
                  spread_factor=0.95,
                  spread=1., min_dist=0.1, ns_rate=5,
                  agility=1., verbose=0,
-                 max_age=3,
+                 max_age=3, pow_err = 80,
                  random_seed=1, epsilon=.9, a=None, b=None, final_vector_count=None, dispersion_method = 'UMAP',
                  fvc_growth=0.5, chunk_size = 1000, pc_components = 50, non_so_rate = 0, low_memory = False, sampled_batches = False, um_min_dist = 0.001, um_lr = 0.01, um_epochs = 11):
 
@@ -89,6 +89,7 @@ class SONG(BaseEstimator):
         self.gamma = gamma
         self.verbose = verbose
         self.epsilon = epsilon
+        self.pow_err = pow_err
         self.alpha = a
         self.beta = b
         self.fvc = final_vector_count
@@ -143,6 +144,11 @@ class SONG(BaseEstimator):
             X_pca = self.pca[ix].transform(X)
 
         return X_pca
+
+
+    def generate_graph_on_samples(self, X):
+        pass
+
 
     def fit(self, X, reduction = 'PCA', corrected_PC = np.array([])):
         '''
@@ -224,6 +230,8 @@ class SONG(BaseEstimator):
             G = self.G
             Y = self.Y
             E_q = self.E_q
+            for eq in E_q:
+                eq *= 0.
             self.prototypes += self.prototypes * self.prot_inc_portion
             self.prototypes = np.int(self.prototypes)
             if verbose:
@@ -259,7 +267,7 @@ class SONG(BaseEstimator):
         for set_ix in range(2):
             error_scale = np.median(np.linalg.norm(
                 X - X.mean(axis=0) if not (reduction == 'PCA') else X_PCA[set_ix] - X_PCA[set_ix].mean(axis=0),
-                axis=1)) ** 2
+                axis=1)) ** (2 * self.pow_err)
             thresh_g = -(X[set_ix].shape[1]) if not (reduction == 'PCA') else -(X_PCA[set_ix].shape[1]) * np.log(
                 self.sf) * error_scale
 
@@ -291,9 +299,12 @@ class SONG(BaseEstimator):
                 non_growing_iter = 0
                 shp = np.arange(G.shape[0]).astype(np.int32)
 
-                if self.mutable_graph and self.prototypes >= G.shape[0] and i > 0:
+                if self.mutable_graph and self.prototypes > G.shape[0] and i > 0:
                     ''' Growing of new coding vectors and low-dimensional vectors '''
+
                     W_ret_0, W_ret_1, G, Y, E_q_ret = bulk_grow_with_drifters_duplex(shp, np.array(E_q), set_ix, thresh_g, drifters, G, W[0], W[1], Y)
+                    if np.isinf(W_ret_0).any():
+                        raise Exception('nan found')
                     W[0] = W_ret_0
                     W[1] = W_ret_1
                     E_q[0] = E_q_ret[0]
@@ -304,6 +315,9 @@ class SONG(BaseEstimator):
                 chunk_size =  self.chunk_size if i else 100
                 n_chunks = X_presented.shape[0]//chunk_size + 1
                 if reduction == 'PCA' :# and X[set_ix].shape[1] > self.pc_components:
+
+                    if np.isinf(W[set_ix]).any() or np.isnan(W[set_ix]).any():
+                        raise Exception("inf found")
                     W_ = self.pca[set_ix].transform(W[set_ix]).astype(np.float32)
                 else:
                     W_ = W[set_ix]
@@ -324,7 +338,7 @@ class SONG(BaseEstimator):
 
                     if verbose:
                         print(f'\r split ratio: {split_ratio} set:{set_ix},  |G| = {G.shape[0]}, |X| = {X_presented.shape[0]}, epoch = {i+1}/{self.max_its}, Training chunk {chunk + 1} of {n_chunks}', end='')
-                    W_ret, Y, G, E_q_ret = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, lrdec, im_neix,
+                    W_ret, Y, G, E_q_ret = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, self.pow_err, im_neix,
                                                          W[set_ix],
                                                          self.max_epochs_per_sample, G, epsilon,
                                                          self.min_strength,
@@ -345,6 +359,225 @@ class SONG(BaseEstimator):
                 non_growing_iter += 1
 
 
+
+        self.reduced_lr = self.reduced_lr * self.agility
+        self.W = W
+        self.Y = Y
+        self.G = G
+        self.E_q = E_q
+        self.so_lr_st = so_lr_st
+        self.trained = True
+        if verbose:
+            print('\n Done ...')
+        return self
+
+
+    def early_reg(self, X, reduction='PCA', corrected_PC=np.array([])):
+        '''
+        :param X: The input dataset normalized over the dataset to range [0, 1].
+        :param L: If needed, provide labels for the intermediate visualizations. Must be same length as input array and
+        same order
+        :return: Y : The Mapped Coordinates in the desired output space (default = 2 ).
+        '''
+        X[0] = X[0].astype(np.float32)
+        X[1] = X[1].astype(np.float32)
+        X_PCA = [None, None]
+
+        for set_ix in range(2):
+            if reduction == 'PCA':  # and X[set_ix].shape[1] > self.pc_components:
+                if not corrected_PC.shape[0]:
+                    if self.verbose:
+                        print('Fitting Reduction for Neighborhood Function Calculation')
+                    self._train_pca(X[set_ix][self.random_state.permutation(X[set_ix].shape[0])[:10000]], set_ix)
+
+                    if self.verbose:
+                        print('reduction model fitted!')
+                if not corrected_PC.shape[0]:
+
+                    X_PCA[set_ix] = self._get_XPCA(X[set_ix], set_ix)
+                else:
+                    X_PCA[set_ix] = corrected_PC
+            else:
+                X_PCA[set_ix] = X[set_ix]
+
+        verbose = self.verbose
+        min_dist = self.min_dist
+        spread = self.spread
+
+        min_batch = 1000 if not self.sampled_batches else 10000
+
+        if self.alpha is None and self.beta is None:
+            alpha, beta = find_spread_tightness(spread, min_dist)
+            self.alpha = alpha
+            self.beta = beta
+        else:
+            alpha = self.alpha
+            beta = self.beta
+
+        if self.sf is None:
+            self.sf = np.log(4) / (2 * self.ss)
+
+        so_lr_st = self.lrst
+        if self.prototypes is None:
+            if not self.fvc is None:
+                self.prototypes = self.fvc
+            else:
+                self.prototypes = int(np.exp(np.log(min(X[0].shape[0], X[1].shape[0])) / 1.5))
+        ''' Initialize coding vector weights and output coordinate system  '''
+        ''' index of the last nearest neighbor : depends on output dimensionality. Higher the output dimensionality, 
+                       higher the connectedness '''
+
+        im_neix = self.dim + self.n_neighbors
+
+        if self.ss is None:
+            if X[0].shape[0] < 100000 or not self.sampled_batches:
+                self.ss = 100  # (20 if X.shape[0] > 100000 else 20)
+            else:
+                self.ss = X[0].shape[0] // min_batch + 1
+
+        self.max_its = self.ss * self.non_so_rate
+
+        if self.trained:
+            ''' When reusing a trained model, this block will be executed.'''
+            W = self.W
+            G = self.G
+            Y = self.Y
+            E_q = self.E_q
+            self.prototypes += self.prototypes * self.prot_inc_portion
+            self.prototypes = np.int(self.prototypes)
+            if verbose:
+                print('Using Trained Map')
+        else:
+            ''' If the model is not already initialized ...'''
+            init_size = 500
+            W = [None, None]
+            E_q = [None, None]
+            for set_ix in range(2):
+                W[set_ix] = X[set_ix][self.random_state.choice(X[set_ix].shape[0],
+                                                               init_size)]
+                E_q[set_ix] = np.zeros(W[set_ix].shape[0]).astype(np.float32)
+            Y = UMAP(random_state=self.random_state.randint(0, 10)).fit_transform(W[0])
+            if verbose:
+                print('random map initialization')
+                print('Stopping at {} prototypes'.format(self.prototypes))
+
+            ''' Initialize Graph Adjacency and Weight Matrices '''
+
+            G = np.identity(W[0].shape[0]).astype(np.float32)
+
+        order = [None, None]
+        presented_len = [None, None]
+        sratios = [None, None]
+        batch_sizes = [None, None]
+        soeds = np.arange(self.ss)
+        soed = 0
+        lrdec = 1.
+        lrst = self.lrst
+
+        for set_ix in range(2):
+            error_scale = np.median(np.linalg.norm(
+                X - X.mean(axis=0) if not (reduction == 'PCA') else X_PCA[set_ix] - X_PCA[set_ix].mean(axis=0),
+                axis=1)) ** (2 * self.pow_err)
+            thresh_g = -(X[set_ix].shape[1]) if not (reduction == 'PCA') else -(X_PCA[set_ix].shape[1]) * np.log(
+                self.sf) * error_scale
+
+            order[set_ix] = self.random_state.permutation(X[set_ix].shape[0])
+            presented_len[set_ix] = X[set_ix].shape[0]
+            sratios[set_ix] = ((soeds) * 1. / (self.ss - 1))
+
+            batch_sizes[set_ix] = (X[set_ix].shape[0] - min_batch) * (
+                (sratios[set_ix] * 0) if self.low_memory else sratios[set_ix] ** (100)) + min_batch
+        sratios[1][1:] = sratios[0][:-1]
+
+        epsilon = self.epsilon
+        lr_sigma = np.float32(5)
+        drifters = np.array([])
+
+        split_ratio = (np.log(X[0].shape[0]) // np.log(X[1].shape[0])) + 1
+        for i in range(5):
+            set_ix = 0#i % 2  # int(i%split_ratio > 0)
+            sparse = issparse(X[set_ix])
+
+            order = self.random_state.permutation(X[set_ix].shape[0]) if not self.sampled_batches else order
+            if not i % self.non_so_rate:
+                presented_len = int(batch_sizes[set_ix][soed]) if not self.sampled_batches else min_batch
+                soed += 1
+            X_presented = X[set_ix][order[:presented_len]] if not self.sampled_batches else X[set_ix][(presented_len * i) %
+                                                                                                      X[set_ix].shape[
+                                                                                                          0]: min(
+                (presented_len * i) % X[set_ix].shape[0] + presented_len, X[set_ix].shape[0])].astype(np.float32)
+            X_presented_pc = X_PCA[set_ix][order[:presented_len]] if not self.sampled_batches else X_PCA[set_ix][
+                                                                                                   (presented_len * i) %
+                                                                                                   X[set_ix].shape[0]: min(
+                                                                                                       (presented_len * i) %
+                                                                                                       X[set_ix].shape[
+                                                                                                           0] + presented_len,
+                                                                                                       X[set_ix].shape[
+                                                                                                           0])].astype(
+                np.float32)
+
+            if not i % self.non_so_rate:
+                non_growing_iter = 1
+                shp = np.arange(G.shape[0]).astype(np.int32)
+
+                # if self.mutable_graph and self.prototypes >= G.shape[0] and i > 0:
+                #     ''' Growing of new coding vectors and low-dimensional vectors '''
+                #     W_ret_0, W_ret_1, G, Y, E_q_ret = bulk_grow_with_drifters_duplex(shp, np.array(E_q), set_ix, thresh_g,
+                #                                                                      drifters, G, W[0], W[1], Y)
+                #     W[0] = W_ret_0
+                #     W[1] = W_ret_1
+                #     E_q[0] = E_q_ret[0]
+                #     E_q[1] = E_q_ret[1]
+                '''shp is an index set used for optimizing search operations'''
+                shp = np.arange(G.shape[0], dtype=np.int32)
+
+                chunk_size = self.chunk_size if i else 100
+                n_chunks = X_presented.shape[0] // chunk_size + 1
+                if reduction == 'PCA':  # and X[set_ix].shape[1] > self.pc_components:
+                    W_ = self.pca[set_ix].transform(W[set_ix]).astype(np.float32)
+                else:
+                    W_ = W[set_ix]
+
+                for chunk in range(n_chunks):
+                    chunk_st = chunk * chunk_size
+                    chunk_en = chunk_st + chunk_size
+                    X_chunk = X_presented[chunk_st:chunk_en].toarray() if sparse else X_presented[chunk_st:chunk_en]
+                    if not X_chunk.shape[0]:
+                        continue
+                    if reduction == 'PCA':  # and X[set_ix].shape[1] > self.pc_components:
+                        X_chunk_ = (X_presented_pc[chunk_st:chunk_en]).astype(np.float32)
+                    else:
+                        X_chunk_ = X_chunk
+
+                    pdists = sq_eucl_opt(X_chunk_, W_).astype(np.float32)
+                    pcvdist = sq_eucl_opt(W_, W_).astype(np.float32)
+
+                    if verbose:
+                        print(
+                            f'\r split ratio: {split_ratio} set:{set_ix},  |G| = {G.shape[0]}, |X| = {X_presented.shape[0]}, epoch = {i + 1}/{self.max_its}, Training chunk {chunk + 1} of {n_chunks}',
+                            end='')
+                    W_ret, Y, G, E_q_ret = graph_creation(X_chunk, pdists, i, self.max_its, lrst, self.pow_err,
+                                                                 im_neix,
+                                                                 W[set_ix],
+                                                                 self.max_epochs_per_sample, G, epsilon,
+                                                                 self.min_strength,
+                                                                 shp, Y,
+                                                                 self.ns_rate, alpha, beta, self.rng_state, E_q[set_ix],
+                                                                 lr_sigma, self.reduced_lr, pcvdist)
+                    W[set_ix] = W_ret
+                    E_q[set_ix] = E_q_ret
+                # drifters = np.where(G.sum(axis=1) == 0)[0]
+
+            else:
+                if verbose:
+                    print('\r Training sans SO epoch {} / {} , |X| = {} , |G| = {}  '.format(i + 1, self.max_its,
+                                                                                             X_presented.shape[0],
+                                                                                             G.shape[0]), end='')
+
+                repeats = 1 if not soed == self.ss else 1
+                for repeat in range(repeats):
+                    Y = embed_batch_epochs(Y, G, self.max_its, i, alpha, beta, self.rng_state, self.reduced_lr)
+                non_growing_iter += 1
 
         self.reduced_lr = self.reduced_lr * self.agility
         self.W = W

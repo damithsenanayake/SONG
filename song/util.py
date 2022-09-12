@@ -385,7 +385,7 @@ def get_closest(dists_2, k):
 
 
 @numba.njit(fastmath=True, )
-def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im_neix, W, max_epochs_per_sample, G, epsilon, min_strength,
+def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, pow_err, im_neix, W, max_epochs_per_sample, G, epsilon, min_strength,
                            shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr, cv_pdist):
 
 
@@ -419,10 +419,48 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, lrdec, im
                                              lrs[k], rng_state, epoch_vector.astype(np.int32),
                                              neg_epoch_vector.astype(np.int32))
 
-        E_q[b] +=  dist_H[b] #** 8#+ (1- error_momentum) * E_q[b]
+        E_q[b] +=  dist_H[b] ** pow_err #** 8#+ (1- error_momentum) * E_q[b]
         # print(dist_H[b]/denom, dist_H, denom)
     return W, Y, G, E_q
 
+@numba.njit(fastmath=True, )
+def graph_creation(X_presented, pdist_matrix, i, max_its, lrst, pow_err, im_neix, W, max_epochs_per_sample, G, epsilon, min_strength,
+                           shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr, cv_pdist):
+
+
+    taus = ((i * X_presented.shape[0] + np.arange(len(X_presented)).astype(np.float32)) * 1. / (max_its * X_presented.shape[0]))
+    # lrs = (1-taus)* reduced_lr
+    # so_lr = lrst * get_so_rate(i * 1. / max_its, lr_sigma)
+    nei_len = np.int32(min(im_neix, W.shape[0]))
+    for k in range(len(X_presented)):
+        # x = X_presented[k]
+        dist_H = pdist_matrix[k]
+        neilist = get_closest(dist_H, nei_len)
+
+        b = neilist[0]
+        G[b] *= epsilon
+
+        G[b][neilist] = 1.
+        G[b][G[b] < min_strength] = 0
+        G[:, b][G[:, b] < min_strength] = 0
+        nei_bin = (G[b] + G[:, b]) > 0
+        neighbors = shp[nei_bin]
+
+        denom = cv_pdist[b, neilist[-1]]#dist_H[neilist[-1]]
+
+        epoch_vector = max_epochs_per_sample * ((G[b] + G[:, b]) / 2. + 1)
+        neg_epoch_vector = ns_rate* (1 - (G[b] + G[:, b]) / 2.) + 1
+
+        '''x, so_lr, b, W, hdist_nei, Y, alpha, beta , lr,  rng_state):'''
+        # W[neighbors], Y = train_neighborhood(x, so_lr, b, neighbors.astype(np.int32), W[neighbors],
+        #                                      dist_H[neighbors] / denom,
+        #                                      Y, ns_rate, alpha, beta,
+        #                                      lrs[k], rng_state, epoch_vector.astype(np.int32),
+        #                                      neg_epoch_vector.astype(np.int32))
+        #
+        # E_q[b] +=  dist_H[b] ** pow_err #** 8#+ (1- error_momentum) * E_q[b]
+        # print(dist_H[b]/denom, dist_H, denom)
+    return W, Y, G, E_q
 
 @numba.njit(
     'UniTuple(f4[:, :], 2)(f4[:], f4,  i4, i4[:],  f4[:,:], f4[:], f4[:,:], i4, f4, f4, f4, i8[:], i4[:], i4[:])',
@@ -473,6 +511,7 @@ def train_neighborhood(x, so_lr, b, neighbors, W, hdist_nei, Y, ns_rate, alpha, 
                 y_b[i] -= positive_clip(pull_grad * (y_b[i] - Y_j[i]), 4) * lr
 
     return W, Y
+
 
 @numba.njit('f4[:,:]( f4[:,:], f4[:, :], i4, i4, f4, f4, i8[:], f4 )', fastmath=True, )
 def embed_batch_epochs(Y, G, max_its, i_st, alpha, beta, rng_state, agility):

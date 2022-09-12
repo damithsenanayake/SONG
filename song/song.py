@@ -18,10 +18,10 @@ class SONG(BaseEstimator):
 
     def __init__(self, n_components=2, n_neighbors=1,
                  lr=1., gamma=None, so_steps = None, mutable_graph = True,
-                 spread_factor=0.95,
+                 spread_factor=0.9,
                  spread=1., min_dist=0.1, ns_rate=5,
                  agility=1., verbose=0,
-                 max_age=2,
+                 max_age=2, pow_err = 2.,
                  random_seed=1, epsilon=.9, a=None, b=None, final_vector_count=None, dispersion_method = 'UMAP',
                  fvc_growth=0.5, chunk_size = 1000, pc_components = 50, non_so_rate = 0, low_memory = False, sampled_batches = False,
                  um_min_dist = 0.001, um_lr = 0.01, um_epochs = 11):
@@ -90,6 +90,7 @@ class SONG(BaseEstimator):
         self.gamma = gamma
         self.verbose = verbose
         self.epsilon = epsilon
+        self.pow_err = pow_err
         self.alpha = a
         self.beta = b
         self.fvc = final_vector_count
@@ -214,7 +215,7 @@ class SONG(BaseEstimator):
         if self.sf is None:
             self.sf = np.log(4) / (2 * self.ss)
 
-        error_scale = np.median(np.linalg.norm(X-X.mean(axis=0) if not (reduction == 'PCA') else X_PCA-X_PCA.mean(axis=0), axis=1))#** 16
+        error_scale = np.median(np.linalg.norm(X-X.mean(axis=0) if not (reduction == 'PCA') else X_PCA-X_PCA.mean(axis=0), axis=1))** (2 * self.pow_err)
         thresh_g = (-(X.shape[1]) if not (reduction=='PCA') else -(X_PCA.shape[1]) ) * np.log(self.sf) * error_scale
         # thresh_g **= 100
 
@@ -308,14 +309,15 @@ class SONG(BaseEstimator):
                     pcvdist = sq_eucl_opt(W_, W_).astype(np.float32)
                     if verbose:
                         print(f'\r  |G| = {G.shape[0]}, |X| = {X_presented.shape[0]}, epoch = {i+1}/{self.max_its}, Training chunk {chunk + 1} of {n_chunks}', end='')
-                    W, Y, G, E_q = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, lrdec, im_neix,
+                    W, Y, G, E_q = train_for_batch_batch(X_chunk, pdists, i, self.max_its, lrst, self.pow_err, im_neix,
                                                          W,
                                                          self.max_epochs_per_sample, G, epsilon,
                                                          self.min_strength,
                                                          shp, Y,
                                                          self.ns_rate, alpha, beta, self.rng_state, E_q,
-                                                         lr_sigma, self.reduced_lr, pdists)
-
+                                                         lr_sigma, self.reduced_lr, pcvdist)
+                    if np.isnan(W).any():
+                        raise Exception()
                 drifters = np.where(G.sum(axis=1) == 0)[0]
 
             else:
