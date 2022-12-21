@@ -1,6 +1,7 @@
 import numba
 import numpy as np
 from scipy.optimize import curve_fit
+from umap import UMAP
 from pynndescent import NNDescent
 
 
@@ -31,7 +32,7 @@ def fast_random_integer(random_state):
 
     return random_state[0] ^ random_state[1] ^ random_state[2]
 
-@numba.njit('f4[:,:](f4[:,:], f4[:,:])', fastmath=True, parallel=True)
+@numba.njit('f4[:,:](f4[:,:], f4[:,:])', fastmath=True)#, parallel=True)
 def sq_eucl_opt(A, B):
     ''' function adapted from https://github.com/numba/numba-scipy/issues/38#issuecomment-623569703 '''
     C = np.empty((A.shape[0], B.shape[0]), np.float32)
@@ -423,6 +424,54 @@ def train_for_batch_batch(X_presented, pdist_matrix, i, max_its, lrst, pow_err, 
         # print(dist_H[b]/denom, dist_H, denom)
     return W, Y, G, E_q
 
+def so_njit_wrap(X_presented, pdist_matrix, i, max_its, lrst, pow_err, im_neix, W, max_epochs_per_sample, G, epsilon, min_strength,
+                           shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr, cv_pdist):
+    taus = ((i * X_presented.shape[0] + np.arange(len(X_presented)).astype(np.float32)) * 1. / (
+                max_its * X_presented.shape[0]))
+    lrs = (1 - taus) * reduced_lr
+    so_lr = lrst * get_so_rate(i * 1. / max_its, lr_sigma)
+    nei_len = np.int32(min(im_neix, W.shape[0]))
+    for k in range(len(X_presented)):
+        x = X_presented[k]
+        dist_H = pdist_matrix[k]
+        neilist = get_closest(dist_H, nei_len)
+
+        b = neilist[0]
+        G[b] *= epsilon
+
+        G[b][neilist] = 1.
+        G[b][G[b] < min_strength] = 0
+        G[:, b][G[:, b] < min_strength] = 0
+        nei_bin = (G[b] + G[:, b]) > 0
+        neighbors = shp[nei_bin]
+
+        denom = cv_pdist[b, neilist[-1]]  # dist_H[neilist[-1]]
+
+        epoch_vector = max_epochs_per_sample * ((G[b] + G[:, b]) / 2. + 1)
+        neg_epoch_vector = ns_rate * (1 - (G[b] + G[:, b]) / 2.) + 1
+
+        '''x, so_lr, b, W, hdist_nei, Y, alpha, beta , lr,  rng_state):'''
+        W[neighbors] = self_organize(x, so_lr, b, neighbors.astype(np.int32), W[neighbors],
+                                     dist_H[neighbors] / denom)
+        '''UMAP project 2d visualization'''
+
+        E_q[b] += dist_H[b] ** pow_err
+
+    return W, G, E_q
+
+
+# @numba.njit(fastmath=True, )
+def train_for_batch_batch_umap(X_presented, pdist_matrix, i, max_its, lrst, pow_err, im_neix, W, max_epochs_per_sample, G, epsilon, min_strength,
+                           shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr, cv_pdist):
+
+
+    W, G, E_q = so_njit_wrap(X_presented, pdist_matrix, i, max_its, lrst, pow_err, im_neix, W, max_epochs_per_sample, G, epsilon, min_strength,
+                           shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr, cv_pdist)
+
+
+
+    return W, G, E_q
+
 @numba.njit(fastmath=True, )
 def graph_creation(X_presented, pdist_matrix, i, max_its, lrst, pow_err, im_neix, W, max_epochs_per_sample, G, epsilon, min_strength,
                            shp, Y, ns_rate, alpha, beta, rng_state, E_q, lr_sigma, reduced_lr, cv_pdist):
@@ -511,6 +560,23 @@ def train_neighborhood(x, so_lr, b, neighbors, W, hdist_nei, Y, ns_rate, alpha, 
                 y_b[i] -= positive_clip(pull_grad * (y_b[i] - Y_j[i]), 4) * lr
 
     return W, Y
+
+
+@numba.njit(
+    'f4[:, :](f4[:], f4,  i4, i4[:],  f4[:,:], f4[:])',
+    fastmath=True, )
+def self_organize(x, so_lr, b, neighbors, W, hdist_nei):
+    hdists = hdist_nei
+    ''' Self Organizing '''
+    sigma = 1.
+    for j in range(W.shape[0]):
+        hdist = hdists[j]
+
+        h_pull_grad =  1. if neighbors[j] == b else np.exp(-sigma * hdist)
+        for i in range(x.shape[0]):
+            W[j][i] += h_pull_grad * so_lr * (x[i] - W[j][i])
+
+    return W
 
 
 @numba.njit('f4[:,:]( f4[:,:], f4[:, :], i4, i4, f4, f4, i8[:], f4 )', fastmath=True, )

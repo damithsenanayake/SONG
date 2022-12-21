@@ -42,7 +42,7 @@ knn2.fit(X_tr2, c2)
 # X_tr1 = X_tr1[30000:]
 # c1 = c1[30000:]
 print(X_tr1.shape[0], X_tr2.shape[0])
-model = SONG(verbose = 1, final_vector_count=500, n_neighbors=5, max_age=1,  so_steps=200, fvc_growth=0)
+model = SONG(verbose = 1, final_vector_count=250, n_neighbors=10, max_age=1,  so_steps=200, )
 model.fit_transform([X_tr1, X_tr2])
 
 
@@ -62,8 +62,8 @@ transport = out.matrix
 second_manifold_shift_order = jnp.array(np.argmax(transport, axis=1))
 model.W[1] = model.W[1][second_manifold_shift_order]
 # model.G[1] = model.G[1][second_manifold_shift_order][:, second_manifold_shift_order]
-model.ss = 200
-model.lrst=.2
+model.ss = 500
+model.lrst=1.
 model.prototypes = 500
 
 tic = timeit.default_timer()

@@ -254,6 +254,8 @@ class SONG(BaseEstimator):
                     (init_size, X[set_ix].shape[1])).astype(np.float32) * 0.0001
                 E_q[set_ix] = np.zeros(W[set_ix].shape[0]).astype(np.float32)
             G = np.identity(W[0].shape[0]).astype(np.float32)
+            if verbose:
+                print('Graph Initialized')
 
         order = [None, None]
         presented_len = [None, None]
@@ -626,7 +628,7 @@ class SONG(BaseEstimator):
         self.Y_loc = Y_init.min(axis=0)
         self.Y_scale = Y_init.max(axis=0) - self.Y_loc
 
-        Y = UMAP(init=Y_init, min_dist=self.min_dist, n_components= self.dim, spread= self.spread, learning_rate=0.01, n_epochs=11).fit_transform(X_pc)
+        Y = UMAP(init=Y_init, min_dist=self.min_dist, n_components= self.dim, spread= self.spread, learning_rate=0.01, n_epochs=11, verbose=self.verbose).fit_transform(X_pc)
         if self.verbose:
             print('transformation done...')
         return (Y * self.Y_scale / 10.) + self.Y_loc
