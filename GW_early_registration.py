@@ -37,18 +37,17 @@ knn1 = KNeighborsClassifier(n_neighbors=5)
 knn2 = KNeighborsClassifier(n_neighbors=5)
 knn1.fit(X_tr1, c1)
 knn2.fit(X_tr2, c2)
-# X_tr2 = X_tr1[:30000]
-# c2 = c1[:30000]
-# X_tr1 = X_tr1[30000:]
-# c1 = c1[30000:]
+
 print(X_tr1.shape[0], X_tr2.shape[0])
+
+#%% ----- EARLY MODEL TRAINING ------
 model = SONG(verbose = 1, final_vector_count=250, n_neighbors=5, max_age=1,  so_steps=200, pow_err=1 )
 model.fit([X_tr1, X_tr2])
 
-
+#%% ----- GROMOV WASSERSTEIN REALIGNMENT OF COARSE GRAINED CODING SET DONE IN THIS BLOCK
 geom_xx = pointcloud.PointCloud(x = model.W[0], y = model.W[0])
 geom_yy = pointcloud.PointCloud(x = model.W[1], y = model.W[1])
-#treat the first manifold as the reference
+
 out = gw.gromov_wasserstein(geom_xx=geom_xx, geom_yy=geom_yy, epsilon = 100, max_iterations = 20, jit = True)
 
 n_outer_iterations = jnp.sum(out.costs != -1)
@@ -61,13 +60,16 @@ transport = out.matrix
 
 second_manifold_shift_order = jnp.array(np.argmax(transport, axis=1))
 model.W[1] = model.W[1][second_manifold_shift_order]
-# model.G[1] = model.G[1][second_manifold_shift_order][:, second_manifold_shift_order]
+
+#%% ------------------------------------------------------------------------------
+
+
 model.ss = 500
 model.lrst=.5
-model.prototypes = 500
+model.prototypes = 1200
 
 tic = timeit.default_timer()
-
+#%% ---- VISUALISATION ------------
 Y1, Y2 = model.transform([X_tr1, X_tr2])
 
 
@@ -75,13 +77,6 @@ fig, axes = plt.subplots(2, 3, figsize = (16, 16))
 ax = axes.flatten()[2]
 plotgraph2d(ax, model.Y, model.G)
 ax = axes.flatten()[0]
-# model.Y = model.Y[order]
-# ax.scatter(model.Y.T[0], model.Y.T[1], c = colors_input_spiral, s= 4)
-# # plotgraph2d(ax, model.Y, model.G)
-#
-# ax = axes.flatten()[1]
-#
-# ax.scatter(model.Y.T[0], model.Y.T[1], c = colors_swiss_roll, s= 4)
 
 ax = axes.flatten()[0]
 ax.scatter(Y1.T[0], Y1.T[1], c = c1, cmap = plt.cm.tab10, s= 2)
@@ -91,40 +86,12 @@ ax = axes.flatten()[1]
 ax.scatter(Y2.T[0], Y2.T[1], c = c2, cmap = plt.cm.tab10, s= 2)
 Y1, Y2 = model.fit_transform([X_tr1, X_tr2])
 toc = timeit.default_timer()
-# print(toc - tic)
-# umap1d = UMAP(n_components = 1).fit_transform(model.Y).flatten()
-# order = umap1d.argsort()
-# #OTT for aligning the two manifolds
-# geom_xx = pointcloud.PointCloud(x = model.W[0][order], y = model.W[0][order])
-# geom_yy = pointcloud.PointCloud(x = model.W[1][order], y = model.W[1][order])
-#
-# out = gw.gromov_wasserstein(geom_xx=geom_xx, geom_yy=geom_yy, epsilon = 100, max_iterations = 20, jit = True)
-#
-# n_outer_iterations = jnp.sum(out.costs != -1)
-# has_converged = bool(out.linear_convergence[n_outer_iterations - 1])
-# print(f'{n_outer_iterations} outer iterations were needed.')
-# print(f'The last Sinkhorn iteration has converged: {has_converged}')
-# print(f'The outer loop of Gromov Wasserstein has converged: {out.convergence}')
-# print(f'The final regularised GW cost is: {out.reg_gw_cost:.3f}')
-# transport = out.matrix
-#
-# indices_swiss_roll = jnp.array(np.argmax(transport, axis=1))
-#
-# colors_input_spiral = ['b']*40 + ['silver']*(model.W[0].shape[0] - 40) #+ ['g']*40 + ['silver']*90 + ['r']*40 + ['silver']*30
-# colors_swiss_roll = np.array(['silver']*model.W[0].shape[0])
-# colors_swiss_roll[indices_swiss_roll[:40]] = 'b'
+
 
 fig, axes = plt.subplots(2, 3, figsize = (16, 16))
 ax = axes.flatten()[2]
 plotgraph2d(ax, model.Y, model.G)
 ax = axes.flatten()[0]
-# model.Y = model.Y[order]
-# ax.scatter(model.Y.T[0], model.Y.T[1], c = colors_input_spiral, s= 4)
-# # plotgraph2d(ax, model.Y, model.G)
-#
-# ax = axes.flatten()[1]
-#
-# ax.scatter(model.Y.T[0], model.Y.T[1], c = colors_swiss_roll, s= 4)
 
 ax = axes.flatten()[0]
 ax.scatter(Y1.T[0], Y1.T[1], c = c1, cmap = plt.cm.tab10, s= 2)
