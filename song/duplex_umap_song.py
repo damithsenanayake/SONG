@@ -369,7 +369,8 @@ class SONG(BaseEstimator):
                     W_ = W[set_ix]
 
                 pcvdist = sq_eucl_opt(W_, W_).astype(np.float32)
-
+                G_mult = 1.001 - G
+                pcvdist *= G_mult
                 with warnings.catch_warnings():
                     warnings.simplefilter('ignore', UserWarning)
                     Y = UMAP(n_neighbors=self.vis_neis,n_epochs=50, n_components= self.dim, random_state=self.random_seed, min_dist=self.min_dist,
@@ -381,7 +382,8 @@ class SONG(BaseEstimator):
             W_ = W[0]
 
         pcvdist = sq_eucl_opt(W_, W_).astype(np.float32)
-
+        G_mult = 1.00001- G
+        pcvdist *= G_mult
         with warnings.catch_warnings():
             warnings.simplefilter('ignore', UserWarning)
             Y = UMAP(n_neighbors=self.vis_neis, n_epochs=50, n_components=self.dim, random_state=self.random_seed,
