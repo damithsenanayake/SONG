@@ -1,4 +1,4 @@
-from song.duplex_song import SONG
+from song.duplex_umap_song import SONG
 from sklearn.datasets import make_blobs, load_digits
 from sklearn.cluster import KMeans
 from sklearn.neighbors import KNeighborsClassifier

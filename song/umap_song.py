@@ -24,7 +24,7 @@ class SONG(BaseEstimator):
                  max_age=2, pow_err = 2.,
                  random_seed=1, epsilon=.01, a=None, b=None, final_vector_count=None, dispersion_method = 'UMAP',
                  fvc_growth=0.5, chunk_size = 1000, pc_components = 50, non_so_rate = 0, low_memory = False, sampled_batches = False,
-                 um_min_dist = 0.001, um_lr = 0.01, um_epochs = 11, vis_neis = 6):
+                 um_min_dist = 0.001, um_lr = 0.01, um_epochs = 11, vis_neis = 5):
 
         ''' Initialize a SONG to reduce data.
 
@@ -341,6 +341,9 @@ class SONG(BaseEstimator):
                     W_ = self._get_XPCA(W).astype(np.float32)
                 else:
                     W_ = W
+
+                pcvdist = sq_eucl_opt(W_, W_).astype(np.float32)
+
                 with warnings.catch_warnings():
                     warnings.simplefilter('ignore', UserWarning)
                     Y = UMAP(n_neighbors=self.vis_neis,n_epochs=50, n_components= self.dim, random_state=self.random_seed, min_dist=self.min_dist,
