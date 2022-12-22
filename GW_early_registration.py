@@ -30,7 +30,7 @@ def plotgraph2d(ax, W, G):
 samplesize = 30000
 X = np.array(pd.read_csv('~/data/mnist/mnist_train.csv')).astype(float)
 c1 = X[: samplesize, 0].astype(float)
-X_tr1 = PCA(n_components=150).fit_transform((X[:samplesize, 1:].astype(np.float32)))
+X_tr1 = PCA(n_components=50).fit_transform((X[:samplesize, 1:].astype(np.float32)))
 X_tr2 = PCA(n_components=120).fit_transform(X[samplesize:, 1:].astype(np.float32))
 c2 = X[samplesize:, 0].astype(float)
 knn1 = KNeighborsClassifier(n_neighbors=5)
