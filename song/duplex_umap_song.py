@@ -118,7 +118,7 @@ class SONG(BaseEstimator):
             self.sampled_batches = low_memory
 
     def __repr__(self):
-        return f'SONG model: n(coding vectors) = {self.W.shape[0]}, n(dimensions) = {self.W.shape[1]}, n(components) = {self.Y.shape[1]}' if self.trained else f'untrained SONG model'
+        return f'duplex song model...trained' if self.trained else f'untrained SONG model'
 
     def _train_pca(self, X, ix):
 
