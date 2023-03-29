@@ -198,7 +198,7 @@ class SONG(BaseEstimator):
 
         if self.ss is None:
             if X.shape[0] < 100000 or not self.sampled_batches:
-                self.ss = 100#(20 if X.shape[0] > 100000 else 20)
+                self.ss = 200#(20 if X.shape[0] > 100000 else 20)
             else:
                 self.ss = X.shape[0] // min_batch + 10
         self.max_its = self.ss * self.non_so_rate
@@ -263,7 +263,7 @@ class SONG(BaseEstimator):
         soeds = np.arange(self.ss)
         sratios = ((soeds) * 1. / (self.ss - 1))
 
-        batch_sizes = (X.shape[0] - min_batch) * ((sratios * 0) if self.low_memory else sratios ** (100) ) + min_batch
+        batch_sizes = (X.shape[0] - min_batch) * ((sratios * 0) if self.low_memory else sratios ** (500) ) + min_batch
         epsilon = self.epsilon
         lr_sigma = np.float32(5)
         drifters = np.array([])
@@ -336,13 +336,14 @@ class SONG(BaseEstimator):
                 for repeat in range(repeats):
                     Y = embed_batch_epochs(Y, G, self.max_its, i, alpha, beta, self.rng_state, self.reduced_lr)
                 non_growing_iter += 1
-            if not i%20:
+            if not i%10:
                 if reduction == 'PCA' and X.shape[1] > 100:
                     W_ = self._get_XPCA(W).astype(np.float32)
                 else:
                     W_ = W
 
                 pcvdist = sq_eucl_opt(W_, W_).astype(np.float32)
+                pcvdist *= 1.1- G
 
                 with warnings.catch_warnings():
                     warnings.simplefilter('ignore', UserWarning)

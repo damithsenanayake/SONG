@@ -568,7 +568,7 @@ def train_neighborhood(x, so_lr, b, neighbors, W, hdist_nei, Y, ns_rate, alpha, 
 def self_organize(x, so_lr, b, neighbors, W, hdist_nei):
     hdists = hdist_nei
     ''' Self Organizing '''
-    sigma = 1.
+    sigma = .1
     for j in range(W.shape[0]):
         hdist = hdists[j]
 
