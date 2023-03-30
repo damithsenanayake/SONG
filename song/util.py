@@ -358,7 +358,7 @@ def bulk_grow_with_drifters_duplex(shp, E_q , set_ix, thresh_g, drifters, G, W_0
 
 @numba.njit('f4(f4, f4)', fastmath=True)
 def get_so_rate(tau, sigma):
-    return  np.exp(-sigma * tau ** 2)
+    return  np.exp(-sigma * tau ** 8)
 
 @numba.njit('i4[:](f4[:], i8)')
 def get_closest(dists_2, k):
@@ -429,7 +429,7 @@ def so_njit_wrap(X_presented, pdist_matrix, i, max_its, lrst, pow_err, im_neix, 
     taus = ((i * X_presented.shape[0] + np.arange(len(X_presented)).astype(np.float32)) * 1. / (
                 max_its * X_presented.shape[0]))
     lrs = (1 - taus) * reduced_lr
-    so_lr = lrst * get_so_rate(i * 1. / max_its, lr_sigma)
+    so_lr = (1. - i * 1. / max_its)**2
     nei_len = np.int32(min(im_neix, W.shape[0]))
     for k in range(len(X_presented)):
         x = X_presented[k]
@@ -447,8 +447,7 @@ def so_njit_wrap(X_presented, pdist_matrix, i, max_its, lrst, pow_err, im_neix, 
 
         denom = cv_pdist[b, neilist[-1]]  # dist_H[neilist[-1]]
 
-        epoch_vector = max_epochs_per_sample * ((G[b] + G[:, b]) / 2. + 1)
-        neg_epoch_vector = ns_rate * (1 - (G[b] + G[:, b]) / 2.) + 1
+
 
         '''x, so_lr, b, W, hdist_nei, Y, alpha, beta , lr,  rng_state):'''
         W[neighbors] = self_organize(x, so_lr, b, neighbors.astype(np.int32), W[neighbors],

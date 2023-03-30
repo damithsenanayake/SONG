@@ -288,7 +288,7 @@ class SONG(BaseEstimator):
                 X - X.mean(axis=0) if not (reduction == 'PCA') else X_PCA[set_ix] - X_PCA[set_ix].mean(axis=0),
                 axis=1)) ** (2 * self.pow_err)
             thresh_g = -(X[set_ix].shape[1]) if not (reduction == 'PCA') else -(X_PCA[set_ix].shape[1]) * np.log(
-                self.sf) * error_scale
+                self.sf)
 
             order[set_ix] = self.random_state.permutation(X[set_ix].shape[0])
             presented_len[set_ix] = X[set_ix].shape[0]
@@ -408,11 +408,11 @@ class SONG(BaseEstimator):
 
         self.reduced_lr = self.reduced_lr * self.agility
 
-        W[0] = self.scale_relocate(W[0], scale0, loc0)
-        W[1] = self.scale_relocate(W[1], scale1, loc1)
+        # W[0] = self.scale_relocate(W[0], scale0, loc0)
+        # W[1] = self.scale_relocate(W[1], scale1, loc1)
 
-        X[0] = self.scale_relocate(X[0], scale0, loc0)
-        X[1] = self.scale_relocate(X[1], scale1, loc1)
+        # X[0] = self.scale_relocate(X[0], scale0, loc0)
+        # X[1] = self.scale_relocate(X[1], scale1, loc1)
 
 
         self.W = W
@@ -434,6 +434,23 @@ class SONG(BaseEstimator):
         return self.transform(X, reduction)
 
     def transform(self, X, reduction = 'PCA', corrected_PC = np.array([])):
+
+        X[0] = X[0].astype(np.float32)
+        X[1] = X[1].astype(np.float32)
+
+        scale0 = np.max(X[0]) - np.min(X[0])
+        scale1 = np.max(X[1]) - np.min(X[1])
+
+        loc0 = np.min(X[0])
+        loc1 = np.min(X[1])
+
+        X[0] -= loc0
+        X[0] /= scale0
+
+        X[1] -= loc1
+        X[1] /= scale1
+
+
         output = [None, None]
         '''Adding a PCA-reduction to speed up the transform process'''
         min_dist_args, _, X_pc, W_pc = self.get_representatives(X, reduction=reduction, corrected_PC=corrected_PC)
