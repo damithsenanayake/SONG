@@ -446,6 +446,7 @@ def so_njit_wrap(X_presented, pdist_matrix, i, max_its, lrst, pow_err, im_neix, 
         neighbors = shp[nei_bin]
 
         denom = cv_pdist[b, neilist[-1]]  # dist_H[neilist[-1]]
+        denom += 0.00001
 
 
 

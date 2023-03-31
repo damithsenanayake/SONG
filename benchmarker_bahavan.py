@@ -9,7 +9,7 @@ from sklearn.metrics import adjusted_mutual_info_score
 from umap import UMAP
 from scipy.sparse import csr_matrix
 from ott.geometry import pointcloud
-from ott.core import gromov_wasserstein as gw
+# from ott.core import gromov_wasserstein as gw
 import jax
 from evals import *
 from jax import numpy as jnp
@@ -21,6 +21,8 @@ from sklearn.datasets import load_digits
 import matplotlib.pyplot as plt
 from sklearn.cross_decomposition import CCA
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
+import ot
+
 #
 # sys.path.insert(0, 'METHODS/SCOOTR/')
 # sys.path.insert(0, 'METHODS/UnionCOM/')
@@ -41,42 +43,66 @@ from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 
 from sklearn.neighbors import KNeighborsClassifier
 
+from scipy.spatial.distance import cdist
+def build_knn_graph(X, k):
 
+    pwd = cdist(X, X)
 
-def GASSO_D(X_tr1,X_tr2, prototypes = 500,final_vector_count=100, n_neighbors=4, max_age=3,  so_steps=200, pow_err=1):
+    args = np.argsort(pwd, axis=1)
+    graph = np.zeros_like(pwd)
+    for i , dv in enumerate(args):
 
+        graph[i][dv[:k]] = 1.
 
+    return (graph + graph.T)/2.
+
+def get_gw_alignment_matrix(X1, X2):
+    p = ot.unif(X1.shape[0])
+    q = ot.unif(X2.shape[0])
+    gw, log = ot.gromov.entropic_gromov_wasserstein(
+        X1, X2, p, q, 'square_loss', epsilon=5e-4, log=True, verbose=True)
+
+    return gw
+
+def GASSO_D(X_tr1,X_tr2, prototypes = 500,final_vector_count=200, n_neighbors=3, max_age=5,  so_steps=200, pow_err=1):
+
+    # X_tr1 = PCA(n_components=100).fit_transform(X_tr1)
+    # X_tr2 = PCA(n_components=100).fit_transform(X_tr2)
     print(X_tr1.shape[0], X_tr2.shape[0])
 
-    model = SONG(verbose = 1, final_vector_count=final_vector_count, n_neighbors=n_neighbors, max_age=max_age,  vis_neis= n_neighbors + 15, so_steps=so_steps, pow_err=pow_err)
+    model = SONG(verbose = 1, final_vector_count=final_vector_count, n_neighbors=n_neighbors, max_age=max_age, so_steps=so_steps, pow_err=pow_err)
     print ("Model trained")
     model.fit([X_tr1, X_tr2])
+
+
+    ''' ALTERNATIVE INITIALISATION> DID NOT WORK'''
+    # X1_samples = X_tr1[np.random.randint(0, X_tr1.shape[0], final_vector_count)]
+    # X2_samples = X_tr2[np.random.randint(0, X_tr2.shape[0], final_vector_count)]
+    #
+    # model.W = [X1_samples,X2_samples]
+    # model.G = (build_knn_graph(X1_samples, 20) + build_knn_graph(X2_samples, 20))/2.
+    # model.E_q = [np.zeros(final_vector_count), np.zeros(final_vector_count)]
+    # model.Y = UMAP(metric='precomputed').fit_transform(1-model.G)
+
+
     print ("Model fitted")
 
-    geom_xx = pointcloud.PointCloud(x = model.W[0], y = model.W[0])
-    geom_yy = pointcloud.PointCloud(x = model.W[1], y = model.W[1])
 
-    out = gw.gromov_wasserstein(geom_xx=geom_xx, geom_yy=geom_yy, epsilon = 0.01, max_iterations = 50, jit = True)
-
-    n_outer_iterations = jnp.sum(out.costs != -1)
-    has_converged = bool(out.linear_convergence[n_outer_iterations - 1])
-    print(f'{n_outer_iterations} outer iterations were needed.')
-    print(f'The last Sinkhorn iteration has converged: {has_converged}')
-    # print(f'The outer loop of Gromov Wasserstein has converged: {out.converged}')
-    print(f'The final regularised GW cost is: {out.reg_gw_cost:.3f}')
-    transport = out.matrix
+    C1 = cdist(model.W[0],model.W[0])# * (1- model.G)
+    C2 = cdist(model.W[1], model.W[1])# * (1-model.G)
+    transport = get_gw_alignment_matrix(C1,C2)
 
     second_manifold_shift_order = jnp.array(np.argmax(transport, axis=1))
     model.W[1] = model.W[1][second_manifold_shift_order]
 
 
 
-    model.ss = 1000
+    model.ss = 200
 
     print(f"model ss = {model.ss}")
-    model.lrst=.5
+    # model.lrst=.01
     model.prototypes = prototypes
-
+    model.fit([X_tr1, X_tr2])
     Y1, Y2 = model.transform([X_tr1, X_tr2])
     return model,Y1,Y2
 
@@ -260,23 +286,23 @@ from sklearn.datasets import make_swiss_roll
 
 
 def SWISS_ROLL_GENERATOR(n_samples=500, label_discrete=100):
-    Latent, y = make_swiss_roll(n_samples=n_samples, noise=0.2, random_state=32, hole=False)
+    Latent, y = make_swiss_roll(n_samples=n_samples, noise=0.2, random_state=32, hole=True)
     np.random.seed(0)
-    data1_gen = np.random.rand(3, 1000)
+    data1_gen = np.random.normal(loc=0, scale=1, size =(3, 1000))
     np.random.seed(2)
-    data2_gen = np.random.rand(3, 800)
+    data2_gen = np.random.normal(loc=0, scale=1, size =(3, 800))
 
-    def sigmoid(x, alpha):
-        return 1 / (1 + np.exp(-x * alpha))
+    def sigmoid(x):
+        return 1 / (1 + np.exp(-x**2))
 
     y = np.int8(10 * y)
-    # if (label_discrete!=0):
-    # 	sorted_y = np.sort(y)
-    # 	bins = [(int(np.min(y)+ele*256/label_discrete)) for ele in range(1,label_discrete)]
-    # 	y = np.digitize(y, bins=bins)
+    if (label_discrete!=0):
+    	sorted_y = np.sort(y)
+    	bins = [(int(np.min(y)+ele*256/label_discrete)) for ele in range(1,label_discrete)]
+    	y = np.digitize(y, bins=bins)
 
-    data1 = 10000 * sigmoid(np.matmul(Latent, data1_gen), 1)
-    data2 = 10000 * sigmoid(np.square(np.matmul(Latent, data2_gen)), 1)
+    data1 =  sigmoid(np.matmul(Latent, data1_gen))
+    data2 =  sigmoid(np.matmul(Latent, data2_gen))
 
     hyperparameters = {"SCOT": {},
                        "SCOTv2": {},
@@ -296,8 +322,8 @@ import matplotlib.pyplot as plt
 
 def VQMA(X, y, X_label, y_label, hyperparameters):
     print("Starting with " + str(X.shape[0]) + " " + str(y.shape[0]) + " prototypes")
-    X = preprocessing.StandardScaler().fit_transform(X)
-    y = preprocessing.StandardScaler().fit_transform(y)
+    X = PCA(n_components=100).fit_transform(preprocessing.StandardScaler().fit_transform(X))
+    y = PCA(n_components=100).fit_transform(preprocessing.StandardScaler().fit_transform(y))
     model, X_new, y_new = GASSO_D(X, y)
 
     Y1, Y2 = model.transform([X, y])
