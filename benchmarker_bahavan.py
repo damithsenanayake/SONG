@@ -88,8 +88,8 @@ def GASSO_D(X_tr1,X_tr2, prototypes = 500,final_vector_count=200, n_neighbors=3,
     print ("Model fitted")
 
 
-    C1 = cdist(model.W[0],model.W[0])# * (1- model.G)
-    C2 = cdist(model.W[1], model.W[1])# * (1-model.G)
+    C1 = cdist(model.W[0],model.W[0]) * (1- model.G)
+    C2 = cdist(model.W[1], model.W[1])* (1-model.G)
     transport = get_gw_alignment_matrix(C1,C2)
 
     second_manifold_shift_order = jnp.array(np.argmax(transport, axis=1))
@@ -324,7 +324,7 @@ def VQMA(X, y, X_label, y_label, hyperparameters):
     print("Starting with " + str(X.shape[0]) + " " + str(y.shape[0]) + " prototypes")
     X = PCA(n_components=100).fit_transform(preprocessing.StandardScaler().fit_transform(X))
     y = PCA(n_components=100).fit_transform(preprocessing.StandardScaler().fit_transform(y))
-    model, X_new, y_new = GASSO_D(X, y)
+    model, X_new, y_new = GASSO_D(X, y, prototypes=X.shape[0]/5, final_vector_count=X.shape[0]/20)
 
     Y1, Y2 = model.transform([X, y])
     Ycombined = np.concatenate([Y1, Y2], axis=0)
