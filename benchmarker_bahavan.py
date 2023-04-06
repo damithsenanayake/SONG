@@ -288,9 +288,9 @@ from sklearn.datasets import make_swiss_roll
 def SWISS_ROLL_GENERATOR(n_samples=500, label_discrete=100):
     Latent, y = make_swiss_roll(n_samples=n_samples, noise=0.2, random_state=32, hole=True)
     np.random.seed(0)
-    data1_gen = np.random.normal(loc=0, scale=1, size =(3, 1000))
+    data1_gen = np.random.rand(3, 1000)#(loc=0, scale=1, size =(3, 1000))
     np.random.seed(2)
-    data2_gen = np.random.normal(loc=0, scale=1, size =(3, 800))
+    data2_gen = np.random.rand(3, 800)#(loc=0, scale=1, size =(3, 800))
 
     def sigmoid(x):
         return 1 / (1 + np.exp(-x**2))
