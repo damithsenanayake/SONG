@@ -60,7 +60,7 @@ def get_gw_alignment_matrix(X1, X2):
     p = ot.unif(X1.shape[0])
     q = ot.unif(X2.shape[0])
     gw, log = ot.gromov.entropic_gromov_wasserstein(
-        X1, X2, p, q, 'square_loss', epsilon=5e-4, log=True, verbose=True)
+        X1, X2, p, q, 'square_loss', epsilon=5e-4, log=True)
 
     return gw
 
@@ -68,10 +68,10 @@ def GASSO_D(X_tr1,X_tr2, prototypes = 500,final_vector_count=200, n_neighbors=3,
 
     # X_tr1 = PCA(n_components=100).fit_transform(X_tr1)
     # X_tr2 = PCA(n_components=100).fit_transform(X_tr2)
-    print(X_tr1.shape[0], X_tr2.shape[0])
+    # print(X_tr1.shape[0], X_tr2.shape[0])
 
-    model = SONG(verbose = 1, final_vector_count=final_vector_count, n_neighbors=n_neighbors, max_age=max_age, so_steps=so_steps, pow_err=pow_err)
-    print ("Model trained")
+    model = SONG( final_vector_count=final_vector_count, n_neighbors=n_neighbors, max_age=max_age, so_steps=so_steps, pow_err=pow_err)
+    # print ("Model trained")
     model.fit([X_tr1, X_tr2])
 
 
@@ -85,7 +85,7 @@ def GASSO_D(X_tr1,X_tr2, prototypes = 500,final_vector_count=200, n_neighbors=3,
     # model.Y = UMAP(metric='precomputed').fit_transform(1-model.G)
 
 
-    print ("Model fitted")
+    # print ("Model fitted")
 
 
     C1 = cdist(model.W[0],model.W[0]) * (1- model.G)
@@ -99,11 +99,11 @@ def GASSO_D(X_tr1,X_tr2, prototypes = 500,final_vector_count=200, n_neighbors=3,
 
     model.ss = 200
 
-    print(f"model ss = {model.ss}")
+    # print(f"model ss = {model.ss}")
     # model.lrst=.01
     model.prototypes = prototypes
     model.fit([X_tr1, X_tr2])
-    Y1, Y2 = model.transform([X_tr1, X_tr2])
+    Y1, Y2 = model.fit_transform([X_tr1, X_tr2])
     return model,Y1,Y2
 
 
@@ -333,7 +333,7 @@ def VQMA(X, y, X_label, y_label, hyperparameters):
     fig, ax = plt.subplots(figsize=(12, 10))
     plt.scatter(Ycombined[:, 0], Ycombined[:, 1], c=Ylabels_special, cmap="Spectral", s=10)
     plt.title("SONG Transform: Data1 and Data2 visualized on top of each other", fontsize=18)
-    plt.show()
+    # plt.show()
 
     fig, (ax1, ax2) = plt.subplots(1, 2)
     ax1.scatter(Y1[:, 0], Y1[:, 1], c=X_label, cmap="Spectral", s=10)
@@ -342,7 +342,7 @@ def VQMA(X, y, X_label, y_label, hyperparameters):
     ax2.set_title("system 02")
     plt.legend()
     plt.title("Side by Side", fontsize=18)
-    plt.show()
+    # plt.show()
 
     return [X_new, y_new]
 
@@ -376,24 +376,24 @@ if __name__ == "__main__":
         # "SNAREseq": SNAREseq(),
         # "HSC":HSC(),
         # "PBMC":PBMC(),
-        # "scNMT":scNMT(),
+        # # "scNMT":scNMT(),
         # "SWISSROLL_100":SWISS_ROLL_GENERATOR(n_samples=100,label_discrete=50),
         # "SWISSROLL_200":SWISS_ROLL_GENERATOR(n_samples=100, label_discrete=100),
         # "SWISSROLL_300":SWISS_ROLL_GENERATOR(n_samples=100, label_discrete=100),
         # "SWISSROLL_100_50":SWISS_ROLL_GENERATOR(n_samples=100, label_discrete=50),
         # "SWISSROLL_100_OPEN":SWISS_ROLL_GENERATOR(n_samples=100),
         # "SWISSROLL_500_50":SWISS_ROLL_GENERATOR(n_samples=500, label_discrete=50),
-        "SWISSROLL_500_OPEN": SWISS_ROLL_GENERATOR(n_samples=5000),
+        # "SWISSROLL_500_OPEN": SWISS_ROLL_GENERATOR(n_samples=5000),
         # "SWISSROLL_1000_50":SWISS_ROLL_GENERATOR(n_samples=1000, label_discrete=100),
         # "SWISSROLL_1000_OPEN":SWISS_ROLL_GENERATOR(n_samples=1000),
         # "#SWISSROLL_5000_50":SWISS_ROLL_GENERATOR(n_samples=5000, label_discrete=500),
-        # "SWISSROLL_5000_OPEN":SWISS_ROLL_GENERATOR(n_samples=5000),
-        # "SWISSROLL_10000_50":SWISS_ROLL_GENERATOR(n_samples=10000, label_discrete=500),
-        # "SWISSROLL_10000_OPEN":SWISS_ROLL_GENERATOR(n_samples=10000),
-        # "SWISSROLL_50000_50":SWISS_ROLL_GENERATOR(n_samples=50000, label_discrete=500),
-        # "SWISSROLL_50000_OPEN":SWISS_ROLL_GENERATOR(n_samples=50000),
-        # "SWISSROLL_100000_50":SWISS_ROLL_GENERATOR(n_samples=100000, label_discrete=500),
-        # "SWISSROLL_100000_OPEN":SWISS_ROLL_GENERATOR(n_samples=100000)
+        "SWISSROLL_5000_OPEN":SWISS_ROLL_GENERATOR(n_samples=5000),
+        "SWISSROLL_10000_50":SWISS_ROLL_GENERATOR(n_samples=10000, label_discrete=500),
+        "SWISSROLL_10000_OPEN":SWISS_ROLL_GENERATOR(n_samples=10000),
+        "SWISSROLL_50000_50":SWISS_ROLL_GENERATOR(n_samples=50000, label_discrete=500),
+        "SWISSROLL_50000_OPEN":SWISS_ROLL_GENERATOR(n_samples=50000),
+        "SWISSROLL_100000_50":SWISS_ROLL_GENERATOR(n_samples=100000, label_discrete=500),
+        "SWISSROLL_100000_OPEN":SWISS_ROLL_GENERATOR(n_samples=100000)
     }
 
     method_functions = {

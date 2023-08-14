@@ -304,7 +304,7 @@ class SONG(BaseEstimator):
 
         split_ratio = (np.log(X[0].shape[0])//np.log(X[1].shape[0])) + 1
         for i in range(self.max_its):
-            set_ix = i%2#int(i%split_ratio > 0)
+            set_ix = (i//10)%2#int(i%split_ratio > 0)
             sparse = issparse(X[set_ix])
 
             order = self.random_state.permutation(X[set_ix].shape[0]) if not self.sampled_batches else order
