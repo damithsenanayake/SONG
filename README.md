@@ -1,7 +1,7 @@
 # SONG
 This Repository Contains the Source Code for the Python Implementation of Self Organizing Nebulous Growths.
 
-*NOTE: This implementation has several improvements not described in the publication* 
+*NOTE: This implementation has several improvements not described in the publication https://ieeexplore.ieee.org/document/9210032 * 
 
 ## Installation
 SONG is now available in the Python Packaging Index (PyPI). You can simply install the stable version (current release 1.0.0) via ``pip`` using the following command. 
