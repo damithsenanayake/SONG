@@ -5,6 +5,9 @@ from scipy.sparse import issparse
 from sklearn.base import BaseEstimator
 from umap.umap_ import optimize_layout_euclidean
 from scipy.sparse import coo_matrix
+from scipy.optimize import minimize
+
+from song.retention import neighborhood_temperature, position_kl_loss_and_grad
 
 from song.util import find_spread_tightness, \
     bulk_grow_with_drifters, embed_batch_epochs, \
@@ -23,7 +26,9 @@ class SONG(BaseEstimator):
                  agility=1., verbose=0,
                  max_age=3,
                  random_seed=1, epsilon=.9, a=None, b=None, final_vector_count=None, dispersion_method = 'UMAP',
-                 fvc_growth=0.5, chunk_size = 1000, pc_components = 50, non_so_rate = 0, low_memory = False, sampled_batches = False, um_min_dist = 0.001, um_lr = 0.01, um_epochs = 11):
+                 fvc_growth=0.5, chunk_size = 1000, pc_components = 50, non_so_rate = 0, low_memory = False, sampled_batches = False, um_min_dist = 0.001, um_lr = 0.01, um_epochs = 11,
+                 retention_kl_weight=0.0, retention_position_weight=0.0,
+                 retention_anchor_count=256, retention_maxiter=30):
 
         ''' Initialize a SONG to reduce data.
 
@@ -71,6 +76,19 @@ class SONG(BaseEstimator):
         :param fvc_growth: In incremental scenarios, what is the expected growth ratio of coding vectors in subsequent
         visualizations.
 
+        :param retention_kl_weight: Optional weight for KL between old and updated
+        anchor-neighborhood distributions. Enabled on the initial fit to retain
+        a fixed sample of old input vectors; applied after later fits.
+
+        :param retention_position_weight: Optional Gaussian-position KL weight
+        to keep old anchors in the same coordinate frame.
+
+        :param retention_anchor_count: Number of old input vectors retained as
+        anchors. They are not replayed during the SONG prototype update.
+
+        :param retention_maxiter: Maximum L-BFGS iterations in the post-update
+        coordinate refinement. Input coding vectors are not changed by it.
+
         '''
 
         self.max_epochs_per_sample = np.float32(1)
@@ -109,6 +127,18 @@ class SONG(BaseEstimator):
         self.pca = None
         self.pc_components = pc_components
         self.mutable_graph = mutable_graph
+        if retention_kl_weight < 0 or retention_position_weight < 0:
+            raise ValueError('retention weights must be nonnegative')
+        if retention_anchor_count < 2 or retention_maxiter < 1:
+            raise ValueError('retention_anchor_count >= 2 and retention_maxiter >= 1 are required')
+        self.retention_kl_weight = retention_kl_weight
+        self.retention_position_weight = retention_position_weight
+        self.retention_anchor_count = retention_anchor_count
+        self.retention_maxiter = retention_maxiter
+        self._retention_anchor_X = None
+        self._retention_anchor_Y = None
+        self.retention_result_ = None
+        self._last_reduction = None
 
         if not sampled_batches is None:
             self.sampled_batches = sampled_batches
@@ -144,6 +174,42 @@ class SONG(BaseEstimator):
 
         return X_pca
 
+    def _retention_indices(self, X):
+        if self._last_reduction == 'PCA' and self.pca is not None and X.shape[1] > self.pc_components:
+            X_search = self._get_XPCA(X).astype(np.float32)
+            W_search = self._get_XPCA(self.W).astype(np.float32)
+        else:
+            X_search = X.toarray().astype(np.float32) if issparse(X) else np.asarray(X, dtype=np.float32)
+            W_search = self.W.astype(np.float32)
+        return get_closest_for_inputs(X_search, W_search)[0]
+
+    def _apply_retention_kl(self):
+        indices = self._retention_indices(self._retention_anchor_X)
+        unique, inverse = np.unique(indices, return_inverse=True)
+        reference = self._retention_anchor_Y.astype(np.float64)
+        temperature = neighborhood_temperature(reference)
+        original = self.Y[unique].astype(np.float64)
+
+        def objective(flat):
+            positions = flat.reshape(original.shape)
+            value, anchor_gradient, _, _ = position_kl_loss_and_grad(
+                positions[inverse], reference, temperature,
+                self.retention_kl_weight, self.retention_position_weight)
+            prototype_gradient = np.zeros_like(positions)
+            np.add.at(prototype_gradient, inverse, anchor_gradient)
+            return value, prototype_gradient.ravel()
+
+        before = objective(original.ravel())[0]
+        result = minimize(objective, original.ravel(), jac=True, method='L-BFGS-B',
+                          options={'maxiter': self.retention_maxiter})
+        self.Y[unique] = result.x.reshape(original.shape).astype(np.float32)
+        self.retention_result_ = {
+            'loss_before': float(before), 'loss_after': float(result.fun),
+            'iterations': int(result.nit), 'success': bool(result.success),
+            'anchor_count': len(reference), 'affected_prototypes': len(unique),
+            'temperature': temperature,
+        }
+
     def fit(self, X, reduction = 'PCA', corrected_PC = np.array([])):
         '''
         :param X: The input dataset normalized over the dataset to range [0, 1].
@@ -152,6 +218,12 @@ class SONG(BaseEstimator):
         :return: Y : The Mapped Coordinates in the desired output space (default = 2 ).
         '''
         X = X.astype(np.float32)
+        self.retention_result_ = None
+        self._last_reduction = reduction
+        retention_active = self.retention_kl_weight > 0 or self.retention_position_weight > 0
+        if self.trained and retention_active and self._retention_anchor_X is None:
+            raise ValueError('retention must be enabled before the initial fit')
+        incremental_retention = self.trained and retention_active
 
         use_pca = reduction == 'PCA' and X.shape[1] > self.pc_components
         if use_pca:
@@ -314,6 +386,13 @@ class SONG(BaseEstimator):
         self.E_q = E_q
         self.so_lr_st = so_lr_st
         self.trained = True
+        if incremental_retention:
+            self._apply_retention_kl()
+        elif retention_active and self._retention_anchor_X is None:
+            count = min(self.retention_anchor_count, len(X))
+            anchor_ids = np.random.RandomState(self.random_seed).choice(len(X), count, replace=False)
+            self._retention_anchor_X = X[anchor_ids].copy()
+            self._retention_anchor_Y = self.Y[self._retention_indices(self._retention_anchor_X)].copy()
         if verbose:
             print('\n Done ...')
         return self

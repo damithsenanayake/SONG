@@ -6,7 +6,7 @@ Damith Senanayake *(draft attribution; final author list and affiliations to con
 
 ## Abstract
 
-We evaluate Self-Organizing Nebulous Growths (SONG) as a data-driven initial layout for Uniform Manifold Approximation and Projection (UMAP). SONG creates a prototype graph and a two-dimensional map; assigning each observation to its nearest prototype supplies a coordinate for UMAP's `init` parameter. This combination is motivated by three goals: faster useful layouts, incremental addition of heterogeneous data while retaining prior structure, and placement of unseen observations. On the canonical MNIST 60,000/10,000 train/test split, a SONG-initialized 11-epoch UMAP achieves 92.87% held-out five-nearest-neighbor digit accuracy versus 86.19% for spectral initialization at the same epoch count. The SONG stage makes total fitting slower, however: 7.68 s versus 3.06 s. At 50 epochs the methods have essentially equal accuracy (96.04% versus 96.09%), with SONG initialization again slower end to end (10.65 s versus 5.55 s). A retained hybrid UMAP reducer transforms held-out images in 0.80 s. UMAP already supports transformation and incremental update, so the contribution tested here is initialization quality and the potential to align incremental layouts, rather than introducing those operations. In an ordered MNIST addition without old-data rehearsal, old-digit probe accuracy falls from 97.78% to 90.78% and the original class positions change substantially. Rehearsal recovers much of that structure: the smallest tested fraction meeting an illustrative accuracy-and-position target is 75% of old images. A proposed old-anchor neighborhood KL decreases from 0.250 to 0.063 nats at that fraction. These single-seed results support improved early-epoch label separability and the value of rehearsal, but do not yet support an end-to-end speedup or guaranteed incremental retention for the combined model.
+We evaluate Self-Organizing Nebulous Growths (SONG) as a data-driven initial layout for Uniform Manifold Approximation and Projection (UMAP). SONG creates a prototype graph and a two-dimensional map; assigning each observation to its nearest prototype supplies a coordinate for UMAP's `init` parameter. This combination is motivated by three goals: faster useful layouts, incremental addition of heterogeneous data while retaining prior structure, and placement of unseen observations. On the canonical MNIST 60,000/10,000 train/test split, a SONG-initialized 11-epoch UMAP achieves 92.87% held-out five-nearest-neighbor digit accuracy versus 86.19% for spectral initialization at the same epoch count. The SONG stage makes total fitting slower, however: 7.68 s versus 3.06 s. At 50 epochs the methods have essentially equal accuracy (96.04% versus 96.09%), with SONG initialization again slower end to end (10.65 s versus 5.55 s). A retained hybrid UMAP reducer transforms held-out images in 0.80 s. UMAP already supports transformation and incremental update, so the contribution tested here is initialization quality and the potential to align incremental layouts, rather than introducing those operations. In an ordered MNIST addition without old-data rehearsal, old-digit probe accuracy falls from 97.78% to 90.78% and the original class positions change substantially. Rehearsal recovers much of that structure: the smallest tested fraction meeting an illustrative accuracy-and-position target is 75% of old images. A measured old-anchor neighborhood KL decreases from 0.250 to 0.063 nats at that fraction. We additionally implement an opt-in KL coordinate refinement. Across three incremental-run seeds at 35% rehearsal, it reduces mean normalized old-class centroid drift from 0.224 to 0.112, but does not improve the mean old-digit accuracy loss. Thus KL helps retain positions while rehearsal is still needed for class separation. The evidence does not yet support an end-to-end speedup, a reliable smaller replay budget, or guaranteed incremental retention for the combined model.
 
 ## 1. Introduction
 
@@ -79,7 +79,7 @@ $$
 p_{ij}^{(t)} = \frac{\exp(-\|y_i^{(t)}-y_j^{(t)}\|_2^2/\tau)}{\sum_{k\in A,\;k\ne i}\exp(-\|y_i^{(t)}-y_k^{(t)}\|_2^2/\tau)},\quad j\ne i,\quad t\in\{0,1\}.
 $$
 
-The diagnostic retention loss is $L_{\mathrm{KL}}=|A|^{-1}\sum_{i\in A}D_{\mathrm{KL}}(p_i^{(0)}\|p_i^{(1)})$, using a fixed bandwidth $\tau$ equal to the median positive squared distance among initial anchor pairs. A possible **future** update objective is $L_{\mathrm{SONG}}+\lambda L_{\mathrm{KL}}+\mu L_{\mathrm{anchor}}$, where $L_{\mathrm{anchor}}$ penalizes aligned old-anchor displacement. The neighborhood KL measures changes in relative layout; the anchor term is needed when absolute cluster positions matter. We have measured this KL, **not yet optimized SONG with it**. A KL directly between two raw coordinate vectors would be undefined without specifying position distributions; with equal isotropic Gaussian variance, that KL reduces to a scaled squared displacement.
+The diagnostic retention loss is $L_{\mathrm{KL}}=|A|^{-1}\sum_{i\in A}D_{\mathrm{KL}}(p_i^{(0)}\|p_i^{(1)})$, using a fixed bandwidth $\tau$ equal to the median positive squared distance among initial anchor pairs. The opt-in implementation minimizes $\lambda L_{\mathrm{KL}}+\mu L_{\mathrm{position}}$ **after** each incremental SONG fit. The neighborhood KL measures changes in relative layout; the Gaussian-position KL keeps old anchors in their original coordinate frame. L-BFGS adjusts only the coordinates of prototypes selected by stored anchors. This is a post-update coordinate refinement: it does not alter SONG coding vectors, adjacency, or the sequential update loss. A fully joint $L_{\mathrm{SONG}}+\lambda L_{\mathrm{KL}}+\mu L_{\mathrm{position}}$ objective remains future work. A KL directly between two raw coordinate vectors would be undefined without specifying position distributions; with equal isotropic Gaussian variance, the position KL reduces to a scaled squared displacement.
 
 ![SONG rehearsal visual comparison](../reports/figures/song_rehearsal_mnist.png)
 
@@ -91,13 +91,47 @@ The diagnostic retention loss is $L_{\mathrm{KL}}=|A|^{-1}\sum_{i\in A}D_{\mathr
 
 The [rehearsal script](../reports/song_rehearsal_mnist.py), [frontier and novelty script](../reports/song_rehearsal_optimization.py), and [raw optimization results](../reports/song_rehearsal_optimization.json) reproduce these observations.
 
-### 4.3 Novelty from old-map distance and position KL
+### 4.3 Implemented KL coordinate refinement
+
+The implementation stores 512 old input anchors when the first SONG model is fitted; these fixed anchors are not expanded to cover later increments. After each later fit, it maps those anchors to their current nearest prototypes and uses L-BFGS to minimize the old-neighborhood KL above plus equal-variance Gaussian KL between each old and new anchor position. Anchors are **not** replayed through SONG's input-prototype update. The options are `retention_kl_weight`, `retention_position_weight`, `retention_anchor_count`, and `retention_maxiter`; both weights default to zero. The [source module](../song/retention.py) contains the analytic gradient and [tests](../tests/test_retention.py) check it against finite differences.
+
+A matched MNIST ablation copies one model fitted on digits 0–4, presents digits 5–9 plus a nested old-data replay sample, then measures old and new class separation on fixed stratified label probes. Initial old-digit accuracy is 97.78%. The example target remains at most a one-percentage-point old-accuracy loss and normalized old-centroid drift at most 0.20.
+
+| Update condition | Fit time (s) | Old 5-NN accuracy | New 5-NN accuracy | Old centroid drift | Anchor KL (nats) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 0% replay, no KL | 2.06 | 90.78% | 95.63% | 0.681 | 0.296 |
+| 0% replay, both KL terms | 2.35 | 90.26% | 95.54% | 0.208 | 0.025 |
+| 35% replay, no KL | 2.33 | 96.90% | 95.26% | 0.226 | 0.089 |
+| 35% replay, both KL terms | 2.45 | 96.90% | 95.07% | 0.092 | 0.002 |
+| 50% replay, no KL | 2.55 | 96.88% | 94.85% | 0.191 | 0.071 |
+| 75% replay, no KL | 2.67 | 97.70% | 94.73% | 0.185 | 0.076 |
+
+At 35% replay in seed 42, the KL refinement reduces centroid drift by about 59% without improving old-digit accuracy. Under this example target, 35% replay plus KL passes while 35% without KL fails. The first passing no-KL fraction tested in this seed is 50%, a possible 30% replay-memory reduction **for this run only**. At zero replay, KL improves position retention but does **not** restore old class separation: the coding vectors have already adapted to the new classes. Old input-prototype retention still needs rehearsal or a separate prototype regularizer. New-digit accuracy at 35% decreases by 0.19 percentage points with KL in seed 42.
+
+A follow-up with three SONG seeds (42, 43, 44) checks that single-seed selection. Values below are means ± sample standard deviations; each run uses the same initial state for its KL and no-KL arms. The pass count applies the example one-percentage-point old-accuracy-loss and 0.20 centroid-drift thresholds.
+
+| Replay | KL refinement | Old accuracy drop (pp) | Old centroid drift | Mean fit time (s) | Target passed |
+| ---: | :---: | ---: | ---: | ---: | ---: |
+| 35% | no | 1.18 ± 0.27 | 0.224 ± 0.040 | 2.26 | 0/3 |
+| 35% | yes | 1.24 ± 0.35 | 0.112 ± 0.021 | 2.44 | 1/3 |
+| 50% | no | 1.00 ± 0.21 | 0.180 ± 0.028 | 2.41 | 2/3 |
+| 50% | yes | 0.92 ± 0.13 | 0.098 ± 0.008 | 2.60 | 2/3 |
+
+KL consistently reduces positional drift at both replay fractions, but the 35% memory-budget claim does **not** replicate across seeds. No condition meets the illustrative target in every seed. The added coordinate refinement costs about 0.18–0.19 s per update in this setup. The [three-seed CSV](../reports/song_retention_kl_seeds.csv) and [script](../reports/song_retention_kl_seeds.py) contain individual runs.
+
+![Implemented KL retention ablation](../reports/figures/song_retention_kl_mnist.png)
+
+*Figure 5. Old positions are aligned to the original map. All panels use common axis limits based on the 0.5th and 99.5th percentiles; extreme outliers are clipped for display. The matched 35% panels show the effect of KL refinement.*
+
+The [ablation script](../reports/song_retention_kl_mnist.py) and [raw JSON](../reports/song_retention_kl_mnist.json) include all tested conditions and optimizer diagnostics.
+
+### 4.4 Novelty from old-map distance and position KL
 
 For a vector arriving **before** an update, there is no updated position to compare against. We therefore tested the frozen old map's exact nearest-prototype squared distance as a pre-update novelty score. On the canonical 10,000-image test set, with digits 0–4 treated as known and 5–9 as heterogeneous new classes, it gives AUROC **0.881**. The median squared distances are 13.71 for known and 27.32 for new digits. A KL from each input's soft assignment over old prototypes to the old prototype-occupancy distribution gives AUROC **0.464** in this setting; that particular KL is not a useful detector here.
 
 After fitting a full-rehearsal updated SONG map, we also align the new map on old anchors and compare each test image's old and updated 2D positions. If each position is modeled as an isotropic Gaussian with common variance $\sigma^2$, then $D_{\mathrm{KL}}(\mathcal N(y^{(0)},\sigma^2I)\|\mathcal N(y^{(1)},\sigma^2I))=\|y^{(0)}-y^{(1)}\|_2^2/(2\sigma^2)$. With $\sigma^2=\tau$ from the anchor scale above, this **post-update** score gives AUROC **0.758**; median scores are 0.012 for old and 0.056 for new test digits. It may help explain where an update altered the map, but cannot serve as a pre-update out-of-sample detector. These are single-split diagnostics, not calibrated deployment thresholds.
 
-### 4.4 Out-of-sample transformation
+### 4.5 Out-of-sample transformation
 
 The retained UMAP reducer initialized from SONG placed all 10,000 held-out images in 0.80 s in the 11-epoch run and reached 92.87% held-out 5-NN accuracy. This demonstrates that the hybrid fit can use UMAP's existing `transform` API. The branch's older `SONG.transform` path with UMAP dispersion starts a fresh UMAP fit per call, so it does not itself provide a persistent shared coordinate frame; the experiment explicitly retains a single UMAP instance.
 
@@ -107,7 +141,7 @@ The main optimization target is SONG preparation cost. Potential directions are 
 
 ## Reproducibility and limitations
 
-The executable experiment is [`reports/song_umap_initialization.py`](../reports/song_umap_initialization.py), with [raw results](../reports/song_umap_initialization.csv) and [metadata](../reports/song_umap_initialization_meta.json). The [prototype-search benchmark](../reports/prototype_search_bench.py) supplies the search numbers. The experiment is a single-seed, single-dataset preliminary study; no confidence intervals are estimated. Hardware timings may vary, and JIT warm-up excludes first-use compilation. The 50-dimensional PCA is itself learned by SONG and its cost is included in SONG preparation. The heterogeneous and rehearsal experiments are SONG-core studies separate from the hybrid fit; its 2D SONG core contains tied coordinates at shared prototypes, which can lower the neighborhood-overlap metric and makes the measured drift a mixture of prototype motion and reassignment. No claim of universal speedup, novel `transform` support, or proven hybrid incremental stability follows from these data.
+The executable experiment is [`reports/song_umap_initialization.py`](../reports/song_umap_initialization.py), with [raw results](../reports/song_umap_initialization.csv) and [metadata](../reports/song_umap_initialization_meta.json). The [prototype-search benchmark](../reports/prototype_search_bench.py) supplies the search numbers. The UMAP initialization and novelty experiments are single-seed preliminary studies; the KL retention check uses three seeds on the same dataset. No confidence intervals are estimated. Hardware timings may vary, and JIT warm-up excludes first-use compilation. The 50-dimensional PCA is itself learned by SONG and its cost is included in SONG preparation. The heterogeneous, rehearsal, and KL-refinement experiments are SONG-core studies separate from the hybrid fit; its 2D SONG core contains tied coordinates at shared prototypes, which can lower the neighborhood-overlap metric and makes the measured drift a mixture of prototype motion and reassignment. No claim of universal speedup, novel `transform` support, or proven hybrid incremental stability follows from these data.
 
 ## References
 

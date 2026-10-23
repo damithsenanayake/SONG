@@ -35,6 +35,21 @@ To retain a model after training it, use a variable to store the model
 ``model = SONG()``<br>
 ``model.fit(X)``
 
+## Optional incremental layout retention
+
+SONG can retain a fixed sample of old input anchors and refine prototype **coordinates** after an incremental fit using old-neighborhood KL and Gaussian-position KL:
+
+```python
+model = SONG(so_steps=30, dispersion_method='none',
+             retention_kl_weight=1.0, retention_position_weight=1.0,
+             retention_anchor_count=512)
+model.fit(old_data)
+model.fit(new_data)
+print(model.retention_result_)
+```
+
+The weights default to zero. Enable them before the first fit so anchors can be stored. The refinement adjusts output coordinates after training; it does not prevent input coding vectors from drifting. The [matched MNIST ablation](reports/song_retention_kl_mnist.json) shows that KL improves old cluster positions, while rehearsal remains necessary to retain old class separation. See the [preprint draft](preprint/SONG_initialized_UMAP.md#43-implemented-kl-coordinate-refinement) for the objective and limitations.
+
 ## Reproducible performance reports
 
 The [`reports/`](reports/) directory contains six executed notebooks with plots and CSV results for the `UMAP_dispersion` branch: [static embeddings](reports/01_static_baseline.ipynb), [incremental behavior](reports/02_incremental_baseline.ipynb), [parameter candidates](reports/03_tuning_candidates.ipynb), [PCA-fix validation](reports/04_pca_fix_validation.ipynb), [full MNIST profiling](reports/05_mnist_full_profile.ipynb), and [SONG-initialized UMAP preprint experiments](reports/06_song_umap_preprint_experiments.ipynb). The [draft preprint](preprint/SONG_initialized_UMAP.md) reports both the early-epoch quality gain and the lack of an end-to-end speedup on MNIST. The [side-by-side SONG dispersion and UMAP plot](reports/figures/umap_dispersion_vs_umap.png) uses the same 600 labeled digits in both panels. The original baseline smoke benchmarks are not a reproduction of the [SONG paper](https://arxiv.org/abs/1912.04896).
