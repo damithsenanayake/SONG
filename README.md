@@ -37,7 +37,7 @@ To retain a model after training it, use a variable to store the model
 
 ## Reproducible performance reports
 
-The [`reports/`](reports/) directory contains four executed notebooks with plots and CSV results for the `UMAP_dispersion` branch: [static embeddings](reports/01_static_baseline.ipynb), [incremental behavior](reports/02_incremental_baseline.ipynb), [parameter candidates](reports/03_tuning_candidates.ipynb), and [PCA-fix validation](reports/04_pca_fix_validation.ipynb). The [side-by-side SONG dispersion and UMAP plot](reports/figures/umap_dispersion_vs_umap.png) uses the same 600 labeled digits in both panels. The original baseline smoke benchmarks are not a reproduction of the [SONG paper](https://arxiv.org/abs/1912.04896).
+The [`reports/`](reports/) directory contains five executed notebooks with plots and CSV results for the `UMAP_dispersion` branch: [static embeddings](reports/01_static_baseline.ipynb), [incremental behavior](reports/02_incremental_baseline.ipynb), [parameter candidates](reports/03_tuning_candidates.ipynb), [PCA-fix validation](reports/04_pca_fix_validation.ipynb), and [full MNIST profiling](reports/05_mnist_full_profile.ipynb). The [side-by-side SONG dispersion and UMAP plot](reports/figures/umap_dispersion_vs_umap.png) uses the same 600 labeled digits in both panels. The original baseline smoke benchmarks are not a reproduction of the [SONG paper](https://arxiv.org/abs/1912.04896).
 
 To rerun all notebooks on the current code (overwriting the saved historical baseline outputs) with Python 3.11 and [uv](https://docs.astral.sh/uv/):
 

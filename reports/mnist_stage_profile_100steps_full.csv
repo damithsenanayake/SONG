@@ -1,0 +1,7 @@
+stage,seconds,calls
+train_for_batch_batch,4.202106331475079,208
+sq_eucl_opt,0.5083960499614477,208
+PCA transform,0.06461908272467554,13
+PCA fit,0.03649274993222207,1
+bulk_grow_with_drifters,0.028267208603210747,45
+fit remainder,0.19550103624351323,1

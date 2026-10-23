@@ -1,0 +1,48 @@
+{
+  "data_source": "https://storage.googleapis.com/tensorflow/tf-keras-datasets/mnist.npz",
+  "data_sha256": "731c5ac602752760c8e48fbffcf8c3b850d9dc2a2aedcf2cc48468fc17b673d1",
+  "train_size": 60000,
+  "test_size": 10000,
+  "features": 784,
+  "normalization": "float32 pixels / 255",
+  "song_steps": 30,
+  "song_prototypes": 1049,
+  "pc_components": 50,
+  "dispersion_epochs": 11,
+  "numba_threads": "4",
+  "blas_threads": "4",
+  "platform": "macOS-26.2-arm64-arm-64bit",
+  "metrics": {
+    "song_fit_s": 1.7476055000443012,
+    "representative_assignments_s": 0.22721845901105553,
+    "prototype_test_accuracy": 0.9158,
+    "prototype_test_balanced_accuracy": 0.9149099658446387,
+    "occupied_prototypes": 1049,
+    "core_train_transform_s": 0.1918957909801975,
+    "core_test_transform_s": 0.03197445906698704,
+    "core_probe_s": 0.016288917046040297,
+    "core_2d_test_accuracy": 0.909,
+    "core_2d_test_balanced_accuracy": 0.9079137692714297,
+    "pca_linear_probe_s": 0.2558022500015795,
+    "pca_linear_test_accuracy": 0.9132,
+    "dispersion_train_transform_s": 8.010086041991599,
+    "dispersion_test_transform_s": 0.16042900003958493,
+    "dispersion_cross_frame_probe_s": 0.01826604106463492,
+    "dispersion_cross_frame_test_accuracy": 0.8875,
+    "peak_rss_gib": 1.504730224609375
+  },
+  "stage_times": {
+    "PCA fit": 0.045870832982473075,
+    "PCA transform": 0.06574029207695276,
+    "sq_eucl_opt": 0.15690491360146552,
+    "train_for_batch_batch": 1.429534967057407,
+    "bulk_grow_with_drifters": 0.009118375135585666
+  },
+  "stage_calls": {
+    "PCA fit": 1,
+    "PCA transform": 13,
+    "sq_eucl_opt": 102,
+    "train_for_batch_batch": 102,
+    "bulk_grow_with_drifters": 29
+  }
+}

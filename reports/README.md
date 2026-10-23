@@ -46,3 +46,17 @@ The original baseline files above are saved outputs from commit `4c711c8`; rerun
 The pre-fix 30-step, 50-component run scored 0.853 trustworthiness and 0.303 ARI (one seed). The 100-epoch setting is now available through `SONG(um_epochs=100)`; the default remains 11 to preserve the existing runtime. The [comparison plot](figures/pca_fix_embeddings.png) shows the class structure and remaining overlap. See the [five-seed score plot](figures/pca_fix_scores.png) for run-to-run variation. These results are small exploratory checks, not paper-scale replication.
 
 To rerun only the current validation notebook, use `PATH="$PWD/.venv/bin:$PATH" NUMBA_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 .venv/bin/python reports/run.py 04_pca_fix_validation.ipynb` from the repository root.
+
+
+## Full MNIST train/test profile
+
+The [executed MNIST notebook](05_mnist_full_profile.ipynb) profiles the [Keras MNIST 60,000/10,000 split](https://keras.io/api/datasets/mnist/) with 784 float32 pixel features scaled to `[0,1]`. SONG fits only the training images; training labels are used afterward for prototype-majority labels and 2D probes. This is a single-seed run on an Apple Silicon Mac with four Numba and four BLAS threads after JIT warm-up. It is not a paper reproduction.
+
+| SONG steps | Fit seconds | Prototypes | Prototype test accuracy | Core 2D test accuracy | UMAP train dispersion seconds |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 30 | 1.75 | 1,049 | 91.58% | 90.90% | 8.01 |
+| 100 (default) | 5.04 | 1,557 | 93.81% | 93.54% | 7.92 |
+
+At 100 steps, the pairwise distance kernel uses **0.51 s** of fit time; sequential prototype and map updates in `train_for_batch_batch` use **4.20 s**. The current Numba distance kernel already parallelizes input-row blocks. On a 1,000 × 1,050 × 50D matrix, it took **6.62 ms** with one thread and **1.20 ms** with eight. The [thread-scaling chart](figures/mnist_distance_threads.png) and [full pipeline timing chart](figures/mnist_pipeline_profile.png) show the measurements. For larger batches, improving distance calculation alone has limited end-to-end impact; UMAP refinement and prototype updates dominate.
+
+See the [100-step train/test scatter](figures/mnist_song_core_train_test_100steps_full.png), [dispersion scatter](figures/mnist_song_dispersion_train_test_100steps_full.png), and [prototype confusion matrix](figures/mnist_prototype_confusion_100steps_full.png). The dispersion train and test coordinates come from separate UMAP fits, so cross-frame accuracy is a diagnostic rather than a stable out-of-sample score. Raw measurements are in [`mnist_profile_100steps_full.json`](mnist_profile_100steps_full.json), [`mnist_stage_profile_100steps_full.csv`](mnist_stage_profile_100steps_full.csv), and [`mnist_distance_threads.csv`](mnist_distance_threads.csv). Reproduce them with the commands in the notebook. The downloaded archive and embedding arrays stay in ignored `data/`.
