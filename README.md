@@ -34,3 +34,18 @@ To retain a model after training it, use a variable to store the model
 
 ``model = SONG()``<br>
 ``model.fit(X)``
+
+## Reproducible performance reports
+
+The [`reports/`](reports/) directory contains three executed notebooks with plots and CSV results for the `UMAP_dispersion` branch: [static embeddings](reports/01_static_baseline.ipynb), [incremental behavior](reports/02_incremental_baseline.ipynb), and [parameter candidates](reports/03_tuning_candidates.ipynb). The [side-by-side SONG dispersion and UMAP plot](reports/figures/umap_dispersion_vs_umap.png) uses the same 600 labeled digits in both panels. These small, one-seed smoke benchmarks are not a reproduction of the [SONG paper](https://arxiv.org/abs/1912.04896).
+
+To rerun them with Python 3.11 and [uv](https://docs.astral.sh/uv/):
+
+```bash
+uv venv --python 3.11 .venv
+uv pip install --python .venv/bin/python -r reports/requirements.txt
+PATH="$PWD/.venv/bin:$PATH" NUMBA_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 .venv/bin/python reports/run.py
+NUMBA_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 .venv/bin/python -m pytest -q
+```
+
+The current branch passes the static smoke test. Two regression tests are marked expected failures: a second `fit` uses the removed `np.int` alias, and nearest distances lose their fractional values. The incremental notebook first records the actual failure, then uses a process-local compatibility alias solely to inspect later behavior. Fixing those failures is tracked in GitHub issues.

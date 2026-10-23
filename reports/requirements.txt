@@ -1,0 +1,13 @@
+# Baseline report environment (Python 3.11.15)
+numpy==2.4.6
+scipy==1.17.1
+scikit-learn==1.9.1
+numba==0.68.0
+umap-learn==0.5.12
+pynndescent==0.6.0
+matplotlib==3.11.2
+pandas==3.1.0
+nbformat==5.11.1
+nbclient==0.11.0
+ipykernel==7.4.0
+pytest==9.1.1

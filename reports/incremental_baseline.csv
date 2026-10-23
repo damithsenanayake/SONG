@@ -1,0 +1,2 @@
+first_fit_s,unmodified_second_fit_s,unmodified_second_fit,shimmed_second_fit_s,aligned_old_point_drift,initial_prototypes,final_prototypes
+2.5054359580390155,0.00015487498603761196,AttributeError: module 'numpy' has no attribute 'int'.,0.006099999998696148,0.9369511604309082,25,48
