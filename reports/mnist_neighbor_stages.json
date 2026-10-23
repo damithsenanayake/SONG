@@ -1,0 +1,18 @@
+{
+  "train_size": 60000,
+  "song_steps": 100,
+  "core_lookup_s": 0.27032633300404996,
+  "pca_transform_s": 0.009764958987943828,
+  "umap_dispersion_s": 7.489827875047922,
+  "umap_stage_s": {
+    "nearest_neighbors": 5.259933958994225,
+    "fuzzy_simplicial_set": 1.458429791033268,
+    "simplicial_set_embedding": 0.7463301250245422
+  },
+  "umap_stage_calls": {
+    "nearest_neighbors": 1,
+    "fuzzy_simplicial_set": 1,
+    "simplicial_set_embedding": 1
+  },
+  "umap_other_s": 0.02513399999588728
+}

@@ -1,0 +1,11 @@
+{
+  "train_size": 60000,
+  "test_size": 10000,
+  "features": 784,
+  "pca_components": 50,
+  "song_steps": 100,
+  "song_fit_s": 5.312938458053395,
+  "core_transform_s": 0.2795585000421852,
+  "pca_transform_s": 0.02039870899170637,
+  "seed": 42
+}

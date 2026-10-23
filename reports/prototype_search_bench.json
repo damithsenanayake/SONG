@@ -1,0 +1,10 @@
+{
+  "train_size": 60000,
+  "song_steps": 100,
+  "numba_threads": 4,
+  "queries_benchmarked": 10000,
+  "prototypes": 1557,
+  "features": 50,
+  "top3_precomputed_1000_rows_s": 0.006726416992023587,
+  "scipy_tree_build_s_excluded": true
+}

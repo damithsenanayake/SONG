@@ -1,0 +1,23 @@
+{
+  "dataset": "Keras MNIST train; old digits 0-4, new digits 5-9",
+  "old_n": 30596,
+  "new_n": 29404,
+  "song_steps_per_fit": 30,
+  "umap_epochs": 50,
+  "seed": 42,
+  "song": {
+    "old_fit_s": 1.082237041904591,
+    "new_fit_s": 1.956792459008284,
+    "prototypes_after": 1783,
+    "aligned_procrustes_disparity_1000": 0.6581531111701592,
+    "old_neighbor_overlap_at_15": 0.08173333333333332
+  },
+  "umap": {
+    "old_fit_s": 7.60375374997966,
+    "transform_new_s": 6.1260271249338984,
+    "update_s": null,
+    "update_error": "ZeroDivisionError: division by zero",
+    "aligned_procrustes_disparity_1000": 3.213150235998451e-32,
+    "old_neighbor_overlap_at_15": 1.0
+  }
+}

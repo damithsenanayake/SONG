@@ -1,0 +1,77 @@
+# SONG as an initialization for UMAP: a preliminary MNIST study
+
+**Draft preprint — 23 October 2026**  
+Damith Senanayake *(draft attribution; final author list and affiliations to confirm)*
+
+## Abstract
+
+We evaluate Self-Organizing Nebulous Growths (SONG) as a data-driven initial layout for Uniform Manifold Approximation and Projection (UMAP). SONG creates a prototype graph and a two-dimensional map; assigning each observation to its nearest prototype supplies a coordinate for UMAP's `init` parameter. This combination is motivated by three goals: faster useful layouts, incremental addition of heterogeneous data while retaining prior structure, and placement of unseen observations. On the canonical MNIST 60,000/10,000 train/test split, a SONG-initialized 11-epoch UMAP achieves 92.87% held-out five-nearest-neighbor digit accuracy versus 86.19% for spectral initialization at the same epoch count. The SONG stage makes total fitting slower, however: 7.68 s versus 3.06 s. At 50 epochs the methods have essentially equal accuracy (96.04% versus 96.09%), with SONG initialization again slower end to end (10.65 s versus 5.55 s). A retained hybrid UMAP reducer transforms held-out images in 0.80 s. UMAP already supports transformation and incremental update, so the contribution tested here is initialization quality and the potential to align incremental layouts, rather than introducing those operations. In an ordered MNIST addition, SONG preserved only 8.17% of old 15-neighbor relations, so the present implementation does not demonstrate structural retention. These single-seed results support improved early-epoch label separability, but do not yet support an end-to-end speedup or a structure-retention claim for the combined model.
+
+## 1. Introduction
+
+UMAP constructs a neighborhood graph and optimizes a low-dimensional embedding. Its default spectral initialization is an effective general choice, but a learned prototype map may start optimization closer to a useful arrangement. SONG learns prototypes, their graph, and low-dimensional prototype locations, and was designed for incremental visualization, including heterogeneous additions [1]. We ask whether SONG coordinates can initialize UMAP to improve the quality obtained under a short optimization budget.
+
+The distinction between the components matters. The current experiment uses SONG to initialize one UMAP fit. It does **not** incrementally update the resulting hybrid embedding. UMAP itself already provides `transform` for unseen points and `update` for adding data [3]. Therefore, preserving an existing structure during heterogeneous addition is a separate hypothesis, requiring a combined-model experiment rather than inference from SONG alone.
+
+## 2. Method
+
+Given training observations $X=\{x_i\}_{i=1}^n$, SONG learns input-space coding vectors $w_j$ and output-space prototype locations $z_j$. Each observation receives the two-dimensional coordinate of its nearest coding vector,
+
+$$
+j^*(i)=\operatorname*{argmin}_j \|P(x_i)-P(w_j)\|_2^2, \qquad y_i^{(0)}=z_{j^*(i)}.
+$$
+
+where $P$ is the fitted 50-component PCA transform. The array $Y^{(0)}$ is passed as UMAP's explicit `init` argument. UMAP then performs its usual neighborhood-graph construction and low-dimensional optimization. A fitted UMAP reducer is retained to place test observations using `transform`; no separate UMAP fit is made on test data.
+
+The current SONG implementation selects the closest prototype by exact brute-force distance. On 10,000 queries against 1,557 prototypes in 50 dimensions, scikit-learn's `ArgKmin` returned identical indices in 7.38 ms versus 40.27 ms for the current Numba kernel (median of three warm runs). This accelerates that query stage, but the stage is a small fraction of the complete fit. The SONG training profile attributes 4.20 s to sequential prototype/map updates and 0.51 s to pairwise distances during a 5.04 s, 100-step fit. We therefore make no whole-pipeline speed claim from the query benchmark.
+
+## 3. Experimental setup
+
+We use the canonical Keras MNIST split: 60,000 training and 10,000 test 28×28 grayscale images [4]. Pixels are scaled to [0, 1]. SONG is fitted on training images only, with 100 self-organizing steps and seed 42. The same SONG-fitted 50-component PCA coordinates are supplied to **both** UMAP initialization arms, making UMAP input preprocessing identical. Both use 15 neighbors, `min_dist=0.1`, `spread=1`, learning rate 1, and seed 42. The 11- and 50-epoch arms differ only in initialization. We also show UMAP's automatic epoch budget as context, not a matched-budget comparator. UMAP's full-size graph and out-of-sample JIT kernels were warmed before timing. Timings are wall clock on one Apple Silicon Mac with four Numba and BLAS threads; each configuration has one measured seed. Labels are excluded from fitting and used only for evaluation: a five-nearest-neighbor classifier is trained on the 2D training coordinates and evaluated on transformed test coordinates.
+
+## 4. Results
+
+| Initialization | UMAP epochs | UMAP fit (s) | SONG preparation (s) | Total fit (s) | Test transform (s) | Held-out 5-NN accuracy |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Spectral | 11 | 3.06 | 0 | 3.06 | 0.79 | 86.19% |
+| SONG | 11 | 2.09 | 5.59 | 7.68 | 0.80 | 92.87% |
+| Spectral | 50 | 5.55 | 0 | 5.55 | 1.10 | 96.09% |
+| SONG | 50 | 5.06 | 5.59 | 10.65 | 0.98 | 96.04% |
+| Spectral, UMAP default epoch budget | automatic | 17.04 | 0 | 17.04 | 2.18 | 96.35% |
+
+The short SONG-initialized optimization improves held-out accuracy by 6.68 percentage points over spectral initialization at 11 epochs. Its UMAP-only fit is 0.96 s shorter, but SONG preparation adds 5.59 s. At 50 epochs, the accuracy difference is −0.05 percentage points and the combined fit is 5.10 s longer. The spectral 50-epoch run also exceeds the SONG 11-epoch accuracy. Thus the observed benefit is **quality under a fixed UMAP epoch count**, not end-to-end speed at matched quality.
+
+![MNIST training and transformed test embeddings](../reports/figures/song_umap_initialization_mnist.png)
+
+*Figure 1. A fixed random subsample of 12,000 training and 5,000 test images per panel. Colors denote digit labels used for evaluation only. Test coordinates come from the retained fitted reducer.*
+
+### 4.1 Heterogeneous addition
+
+We fit SONG on the 30,596 training images labeled 0–4 for 30 steps, then call `fit` again on the 29,404 images labeled 5–9 for another 30 steps. The second fit takes 1.96 s after a 1.08 s initial fit; the map has 1,783 prototypes afterward. On a fixed random sample of 1,000 old images, only **8.17%** of their 15 nearest old embedding neighbors remain after the update. Procrustes disparity is 0.658 after centering, scaling, and optimal rotation. The observed change combines movement of prototype coordinates and reassignment of images to prototypes. This run therefore **does not support** a claim that the current SONG implementation retains old structure for this heterogeneous increment.
+
+For comparison, 50-epoch UMAP fits the initial digits in 7.60 s and `transform` places all new digits in 6.13 s without modifying old coordinates. Old-neighbor overlap is consequently 100% by construction; this baseline does not adapt the old embedding to new data. Calling the installed UMAP `update` on this particular 5–9-only increment raised `ZeroDivisionError` in `init_update`, so no UMAP-update retention value is available. This is one failure case, not evidence that UMAP lacks an update operation [3].
+
+![Ordered MNIST heterogeneous addition](../reports/figures/song_increment_mnist.png)
+
+*Figure 2. SONG prototype assignments before and after incremental fitting, and UMAP before and after `transform`. Colors indicate digit labels. The figure displays a fixed random subsample of each group.*
+
+This experiment tests the separate SONG component; a hybrid anchor-and-refine method remains future work. Raw values are in [`reports/song_increment_mnist.json`](../reports/song_increment_mnist.json), and the [script](../reports/song_increment_mnist.py) reproduces the experiment.
+
+### 4.2 Out-of-sample transformation
+
+The retained UMAP reducer initialized from SONG placed all 10,000 held-out images in 0.80 s in the 11-epoch run and reached 92.87% held-out 5-NN accuracy. This demonstrates that the hybrid fit can use UMAP's existing `transform` API. The branch's older `SONG.transform` path with UMAP dispersion starts a fresh UMAP fit per call, so it does not itself provide a persistent shared coordinate frame; the experiment explicitly retains a single UMAP instance.
+
+## 5. Discussion and next experiments
+
+The main optimization target is SONG preparation cost. Potential directions are fewer SONG steps, reusing a SONG map across repeated UMAP views, accelerating sequential prototype updates, and investigating whether SONG's prototype graph can help construct or reuse the UMAP neighbor graph. Each must be evaluated against matched-quality spectral UMAP, with total preprocessing and fit time included. For incremental embedding, a proposed hybrid should initialize new observations from an updated SONG map while constraining or explicitly anchoring old UMAP coordinates; evaluate old-neighborhood retention, class separation, and runtime against UMAP `transform` and `update`. Multiple seeds, datasets, hardware platforms, and neighborhood-preservation metrics are needed before making general claims.
+
+## Reproducibility and limitations
+
+The executable experiment is [`reports/song_umap_initialization.py`](../reports/song_umap_initialization.py), with [raw results](../reports/song_umap_initialization.csv) and [metadata](../reports/song_umap_initialization_meta.json). The [prototype-search benchmark](../reports/prototype_search_bench.py) supplies the search numbers. The experiment is a single-seed, single-dataset preliminary study; no confidence intervals are estimated. Hardware timings may vary, and JIT warm-up excludes first-use compilation. The 50-dimensional PCA is itself learned by SONG and its cost is included in SONG preparation. The heterogeneous experiment is separate from the hybrid fit; its 2D SONG core contains tied coordinates at shared prototypes, which can lower the neighborhood-overlap metric and makes the measured drift a mixture of prototype motion and reassignment. No claim of universal speedup, novel `transform` support, or proven hybrid incremental stability follows from these data.
+
+## References
+
+1. Senanayake, D., Wang, W., Naik, S. H., and Halgamuge, S. “Self Organizing Nebulous Growths for Robust and Incremental Data Visualization.” *IEEE Transactions on Neural Networks and Learning Systems* (2020). [arXiv:1912.04896](https://arxiv.org/abs/1912.04896).
+2. McInnes, L., Healy, J., and Melville, J. “UMAP: Uniform Manifold Approximation and Projection for Dimension Reduction.” [arXiv:1802.03426](https://arxiv.org/abs/1802.03426).
+3. UMAP developers. [UMAP API guide](https://umap-learn.readthedocs.io/en/latest/api.html) and [release notes](https://umap-learn.readthedocs.io/en/latest/release_notes.html).
+4. Keras developers. [MNIST digits classification dataset](https://keras.io/api/datasets/mnist/).

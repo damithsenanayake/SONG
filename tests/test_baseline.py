@@ -21,7 +21,6 @@ def test_static_fit_transform_returns_finite_coordinates():
     assert np.isfinite(Y).all()
 
 
-@pytest.mark.xfail(strict=True, reason='second fit uses removed np.int alias')
 def test_incremental_fit_accepts_a_second_batch():
     X = sample_data()
     model = SONG(so_steps=2, final_vector_count=16, dispersion_method='none')

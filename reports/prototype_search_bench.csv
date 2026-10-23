@@ -1,0 +1,5 @@
+method,queries,prototypes,features,median_seconds,mismatch_count
+SONG Numba brute force,10000,1557,50,0.040267416974529624,0
+BLAS matrix product,10000,1557,50,0.011454874998889863,0
+SciPy cKDTree (4 workers),10000,1557,50,0.04089329100679606,0
+scikit-learn ArgKmin,10000,1557,50,0.007384124910458922,0

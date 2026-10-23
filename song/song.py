@@ -216,7 +216,7 @@ class SONG(BaseEstimator):
             Y = self.Y
             E_q = self.E_q
             self.prototypes += self.prototypes * self.prot_inc_portion
-            self.prototypes = np.int(self.prototypes)
+            self.prototypes = int(self.prototypes)
             if verbose:
                 print('Using Trained Map')
         else:
