@@ -28,6 +28,21 @@ Changing `pc_components` also changes preprocessing, so this contrast indicates 
 
 ## Incremental smoke check
 
-A second `fit` on the same model fails because the branch uses the removed `np.int` alias. A process-local alias in [the incremental notebook](02_incremental_baseline.ipynb) permits an exploratory continuation, which yielded normalized, aligned old-point drift of about 0.94 on a synthetic heterogeneous increment. That run does not validate incremental stability. The repository's regression tests currently report **1 passed, 2 expected failures**; fixing them is part of the improvement work.
+A second `fit` on the same model fails because the branch uses the removed `np.int` alias. A process-local alias in [the incremental notebook](02_incremental_baseline.ipynb) permits an exploratory continuation, which yielded normalized, aligned old-point drift of about 0.94 on a synthetic heterogeneous increment. That run does not validate incremental stability. The original regression tests reported **1 passed, 2 expected failures**; fixing them is tracked separately.
 
 Run the notebooks and tests using the commands in the [root README](../README.md#reproducible-performance-reports). Figures are saved in [`figures/`](figures/), while CSV files retain unrounded values.
+
+## PCA coordinate fix and visual check
+
+The original baseline files above are saved outputs from commit `4c711c8`; rerunning their notebooks on the current branch will recompute them with the improved code. [The five-seed validation notebook](04_pca_fix_validation.ipynb) and [raw results](pca_fix_validation.csv) test the corrected 50-component path on the same 600 digit samples. Means across five seeds are:
+
+| Method | Seconds | Trustworthiness @10 | K-means ARI | kNN label probe |
+| --- | ---: | ---: | ---: | ---: |
+| SONG, fixed PCA (11 dispersion epochs) | 0.189 | 0.975 | 0.755 | 0.940 |
+| SONG, fixed PCA (100 dispersion epochs) | 0.229 | 0.983 | 0.815 | 0.965 |
+| SONG, no PCA (11 dispersion epochs) | 0.186 | 0.977 | 0.805 | 0.959 |
+| Standalone UMAP | 0.499 | 0.982 | 0.863 | 0.979 |
+
+The pre-fix 30-step, 50-component run scored 0.853 trustworthiness and 0.303 ARI (one seed). The 100-epoch setting is now available through `SONG(um_epochs=100)`; the default remains 11 to preserve the existing runtime. The [comparison plot](figures/pca_fix_embeddings.png) shows the class structure and remaining overlap. See the [five-seed score plot](figures/pca_fix_scores.png) for run-to-run variation. These results are small exploratory checks, not paper-scale replication.
+
+To rerun only the current validation notebook, use `PATH="$PWD/.venv/bin:$PATH" NUMBA_NUM_THREADS=2 OPENBLAS_NUM_THREADS=2 .venv/bin/python reports/run.py 04_pca_fix_validation.ipynb` from the repository root.

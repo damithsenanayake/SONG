@@ -153,19 +153,19 @@ class SONG(BaseEstimator):
         '''
         X = X.astype(np.float32)
 
-        if reduction == 'PCA' and X.shape[1] > self.pc_components:
-            if not corrected_PC.shape[0]:
+        use_pca = reduction == 'PCA' and X.shape[1] > self.pc_components
+        if use_pca:
+            if self.pca is None:
+                if corrected_PC.shape[0]:
+                    raise ValueError('corrected_PC requires a fitted PCA model for coding vectors')
                 if self.verbose:
                     print('Fitting Reduction for Neighborhood Function Calculation')
                 self._train_pca(X[self.random_state.permutation(X.shape[0])[:10000]])
-
                 if self.verbose:
-                    print ('reduction model fitted!')
-            if not corrected_PC.shape[0]:
-
-                X_PCA = self._get_XPCA(X)
-            else:
-                X_PCA = corrected_PC
+                    print('reduction model fitted!')
+            X_PCA = corrected_PC if corrected_PC.shape[0] else self._get_XPCA(X)
+            if X_PCA.shape != (X.shape[0], self.pca.n_components_):
+                raise ValueError('corrected_PC must match the fitted PCA dimensions')
         else:
             X_PCA = X
         verbose = self.verbose
@@ -267,7 +267,7 @@ class SONG(BaseEstimator):
 
                 chunk_size =  self.chunk_size if i else 100
                 n_chunks = X_presented.shape[0]//chunk_size + 1
-                if reduction == 'PCA' and X.shape[1] > 100:
+                if use_pca:
                     W_ = self.pca.transform(W).astype(np.float32)
                 else:
                     W_ = W
@@ -377,13 +377,13 @@ class SONG(BaseEstimator):
         # if self.verbose:
         #     print('optimizing layout')
         # Y = optimize_layout_euclidean(Y_init, Y_init.copy(), rows, cols, 20, X_pc.shape[0], epochs_per_sample, self.alpha, self.beta, self.rng_state, initial_alpha=0.01)
-        Y = UMAP(init=Y_init, min_dist=self.min_dist, n_components= self.dim, spread= self.spread, learning_rate=0.01, n_epochs=11).fit_transform(X_pc)
+        Y = UMAP(init=Y_init, min_dist=self.min_dist, n_components= self.dim, spread= self.spread, learning_rate=self.um_lr, n_epochs=self.um_epochs).fit_transform(X_pc)
         return Y
 
 
     def get_representatives(self, X, reduction = 'PCA', corrected_PC = np.array([])):
 
-        if reduction == 'PCA' and X.shape[1] > 50:
+        if reduction == 'PCA' and X.shape[1] > self.pc_components:
 
             W_pc = self.pca.transform(self.W).astype(np.float32)
             if not corrected_PC.shape[0]:
