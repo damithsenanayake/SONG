@@ -1,0 +1,57 @@
+{
+  "dataset": "Keras MNIST train; old digits 0-4, new digits 5-9",
+  "seed": 42,
+  "song_steps_per_fit": 30,
+  "initial_fit_s": 1.0366507499711588,
+  "initial_prototypes": 909,
+  "initial_old_class_5nn_accuracy": 0.9777777777777777,
+  "old_n": 30596,
+  "new_n": 29404,
+  "metric_old_sample_n": 1000,
+  "conditions": [
+    {
+      "rehearsal_fraction_of_old": 0.0,
+      "rehearsal_old_n": 0,
+      "new_n": 29404,
+      "increment_fit_s": 1.8829139999579638,
+      "prototypes_after": 1783,
+      "aligned_procrustes_disparity_1000": 0.6581531111701592,
+      "old_neighbor_overlap_at_15": 0.08173333333333332,
+      "normalized_old_class_centroid_rms_drift": 0.6900378772622748,
+      "old_class_5nn_accuracy": 0.907843137254902
+    },
+    {
+      "rehearsal_fraction_of_old": 0.1,
+      "rehearsal_old_n": 3060,
+      "new_n": 29404,
+      "increment_fit_s": 2.0642987079918385,
+      "prototypes_after": 1785,
+      "aligned_procrustes_disparity_1000": 0.27320816607944104,
+      "old_neighbor_overlap_at_15": 0.10906666666666666,
+      "normalized_old_class_centroid_rms_drift": 0.3119942273902607,
+      "old_class_5nn_accuracy": 0.9580065359477125
+    },
+    {
+      "rehearsal_fraction_of_old": 0.5,
+      "rehearsal_old_n": 15298,
+      "new_n": 29404,
+      "increment_fit_s": 2.413825000054203,
+      "prototypes_after": 1778,
+      "aligned_procrustes_disparity_1000": 0.1239491119395672,
+      "old_neighbor_overlap_at_15": 0.15086666666666668,
+      "normalized_old_class_centroid_rms_drift": 0.21305405678058018,
+      "old_class_5nn_accuracy": 0.9733660130718954
+    },
+    {
+      "rehearsal_fraction_of_old": 1.0,
+      "rehearsal_old_n": 30596,
+      "new_n": 29404,
+      "increment_fit_s": 2.903270708047785,
+      "prototypes_after": 1768,
+      "aligned_procrustes_disparity_1000": 0.059249749637746305,
+      "old_neighbor_overlap_at_15": 0.15266666666666667,
+      "normalized_old_class_centroid_rms_drift": 0.13647467097124996,
+      "old_class_5nn_accuracy": 0.9766339869281045
+    }
+  ]
+}

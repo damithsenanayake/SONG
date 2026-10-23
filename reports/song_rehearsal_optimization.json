@@ -1,0 +1,95 @@
+{
+  "seed": 42,
+  "initial_old_class_5nn_accuracy": 0.9777777777777777,
+  "old_anchor_n": 512,
+  "old_anchor_kl_temperature": 54.82712560115942,
+  "example_target": "old 5NN accuracy no more than 1 percentage point below initial and normalized class-centroid drift <= 0.2",
+  "selected_rehearsal_fraction": 0.75,
+  "conditions": [
+    {
+      "rehearsal_fraction_of_old": 0.0,
+      "rehearsal_old_n": 0,
+      "increment_fit_s": 1.8979292919393629,
+      "old_class_5nn_accuracy": 0.907843137254902,
+      "normalized_old_class_centroid_rms_drift": 0.6911038486637577,
+      "old_anchor_neighborhood_kl_nats": 0.250249833341458,
+      "meets_example_target": false
+    },
+    {
+      "rehearsal_fraction_of_old": 0.05,
+      "rehearsal_old_n": 1530,
+      "increment_fit_s": 1.9532737920526415,
+      "old_class_5nn_accuracy": 0.9406862745098039,
+      "normalized_old_class_centroid_rms_drift": 0.4250501607229584,
+      "old_anchor_neighborhood_kl_nats": 0.19956446318788126,
+      "meets_example_target": false
+    },
+    {
+      "rehearsal_fraction_of_old": 0.1,
+      "rehearsal_old_n": 3060,
+      "increment_fit_s": 1.9809804999968037,
+      "old_class_5nn_accuracy": 0.951797385620915,
+      "normalized_old_class_centroid_rms_drift": 0.3148882068613729,
+      "old_anchor_neighborhood_kl_nats": 0.16212872383411234,
+      "meets_example_target": false
+    },
+    {
+      "rehearsal_fraction_of_old": 0.2,
+      "rehearsal_old_n": 6119,
+      "increment_fit_s": 2.1286800409434363,
+      "old_class_5nn_accuracy": 0.9604575163398693,
+      "normalized_old_class_centroid_rms_drift": 0.2302969128107216,
+      "old_anchor_neighborhood_kl_nats": 0.1178314843522264,
+      "meets_example_target": false
+    },
+    {
+      "rehearsal_fraction_of_old": 0.35,
+      "rehearsal_old_n": 10709,
+      "increment_fit_s": 2.3197879580548033,
+      "old_class_5nn_accuracy": 0.9673202614379085,
+      "normalized_old_class_centroid_rms_drift": 0.21240499897461013,
+      "old_anchor_neighborhood_kl_nats": 0.08169459166182125,
+      "meets_example_target": false
+    },
+    {
+      "rehearsal_fraction_of_old": 0.5,
+      "rehearsal_old_n": 15298,
+      "increment_fit_s": 2.420055041089654,
+      "old_class_5nn_accuracy": 0.9700980392156863,
+      "normalized_old_class_centroid_rms_drift": 0.25611548161306197,
+      "old_anchor_neighborhood_kl_nats": 0.10858706199880366,
+      "meets_example_target": false
+    },
+    {
+      "rehearsal_fraction_of_old": 0.75,
+      "rehearsal_old_n": 22947,
+      "increment_fit_s": 2.728140833089128,
+      "old_class_5nn_accuracy": 0.9736928104575163,
+      "normalized_old_class_centroid_rms_drift": 0.17513088489751008,
+      "old_anchor_neighborhood_kl_nats": 0.06298764982383875,
+      "meets_example_target": true
+    },
+    {
+      "rehearsal_fraction_of_old": 1.0,
+      "rehearsal_old_n": 30596,
+      "increment_fit_s": 2.9586439579725266,
+      "old_class_5nn_accuracy": 0.9748366013071895,
+      "normalized_old_class_centroid_rms_drift": 0.1830191478867974,
+      "old_anchor_neighborhood_kl_nats": 0.06763606941119328,
+      "meets_example_target": true
+    }
+  ],
+  "preupdate_novelty": {
+    "old_test_n": 5139,
+    "new_test_n": 4861,
+    "nearest_prototype_squared_distance_auroc": 0.8807081464839287,
+    "assignment_to_old_occupancy_kl_auroc": 0.46375863122055244,
+    "temperature": 0.9605293273925781,
+    "distance_old_median": 13.707756042480469,
+    "distance_new_median": 27.32331085205078,
+    "postupdate_position_gaussian_kl_auroc": 0.7578232561252638,
+    "postupdate_position_kl_old_median": 0.012119163686514261,
+    "postupdate_position_kl_new_median": 0.0561480287020037,
+    "postupdate_position_kl_condition": "Full old-data rehearsal; requires fitting an updated map first"
+  }
+}
