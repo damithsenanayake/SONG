@@ -1,0 +1,165 @@
+{
+  "seed": 42,
+  "old_n": 30596,
+  "new_n": 29404,
+  "song_steps_per_fit": 30,
+  "initial_old_class_5nn_accuracy": 0.9777777777777777,
+  "conditions": [
+    {
+      "condition": "Standard: new only",
+      "old_replay_n": 0,
+      "old_prototypes": 909,
+      "prototypes_after": 1783,
+      "fit_s": 1.905618290998973,
+      "old_class_5nn_accuracy": 0.907843137254902,
+      "new_class_5nn_accuracy": 0.9562999489882673,
+      "normalized_old_class_centroid_rms_drift": 0.6900378772622748,
+      "old_prototype_input_kl_nats": 0.05758892233648716,
+      "old_prototype_input_position_kl_nats": 0.2468917801989376,
+      "old_prototype_output_kl_nats": 0.24810533306417937,
+      "old_prototype_output_position_kl_nats": 0.1782325666738815,
+      "optimizer": null
+    },
+    {
+      "condition": "Protected indices; no KL",
+      "old_replay_n": 0,
+      "old_prototypes": 909,
+      "prototypes_after": 1783,
+      "fit_s": 1.9167970000999048,
+      "old_class_5nn_accuracy": 0.907843137254902,
+      "new_class_5nn_accuracy": 0.9562999489882673,
+      "normalized_old_class_centroid_rms_drift": 0.6900378772622748,
+      "old_prototype_input_kl_nats": 0.05758892233648716,
+      "old_prototype_input_position_kl_nats": 0.2468917801989376,
+      "old_prototype_output_kl_nats": 0.24810533306417937,
+      "old_prototype_output_position_kl_nats": 0.1782325666738815,
+      "optimizer": null
+    },
+    {
+      "condition": "Prototype neighborhood KL; new only",
+      "old_replay_n": 0,
+      "old_prototypes": 909,
+      "prototypes_after": 1783,
+      "fit_s": 2.3282105840044096,
+      "old_class_5nn_accuracy": 0.9160130718954248,
+      "new_class_5nn_accuracy": 0.9474579153205237,
+      "normalized_old_class_centroid_rms_drift": 0.3651770054519948,
+      "old_prototype_input_kl_nats": 0.0018203745128521896,
+      "old_prototype_input_position_kl_nats": 0.14414066877716944,
+      "old_prototype_output_kl_nats": 1.3671930324311332e-05,
+      "old_prototype_output_position_kl_nats": 0.005666357268157416,
+      "optimizer": {
+        "source": "prototypes",
+        "protected_prototypes": 909,
+        "input": {
+          "loss_before": 0.05758892233648716,
+          "loss_after": 0.0018203743666441775,
+          "iterations": 7,
+          "success": true,
+          "temperature": 53.10077185795288
+        },
+        "output": {
+          "loss_before": 0.24810533306417937,
+          "loss_after": 1.3671917713576029e-05,
+          "iterations": 8,
+          "success": true,
+          "temperature": 47.72809561926499
+        }
+      }
+    },
+    {
+      "condition": "Prototype position KL; new only",
+      "old_replay_n": 0,
+      "old_prototypes": 909,
+      "prototypes_after": 1783,
+      "fit_s": 2.150757292052731,
+      "old_class_5nn_accuracy": 0.9714052287581699,
+      "new_class_5nn_accuracy": 0.9498384628464547,
+      "normalized_old_class_centroid_rms_drift": 0.025721406825729293,
+      "old_prototype_input_kl_nats": 7.440211261084292e-14,
+      "old_prototype_input_position_kl_nats": 1.7024698110320985e-13,
+      "old_prototype_output_kl_nats": 0.0,
+      "old_prototype_output_position_kl_nats": 0.0,
+      "optimizer": {
+        "source": "prototypes",
+        "protected_prototypes": 909,
+        "input": {
+          "loss_before": 0.2468917801989376,
+          "loss_after": 3.937706728615402e-29,
+          "iterations": 2,
+          "success": true,
+          "temperature": 53.10077185795288
+        },
+        "output": {
+          "loss_before": 0.1782325666738815,
+          "loss_after": 3.453131654357758e-31,
+          "iterations": 2,
+          "success": true,
+          "temperature": 47.72809561926499
+        }
+      }
+    },
+    {
+      "condition": "Prototype both KL; new only",
+      "old_replay_n": 0,
+      "old_prototypes": 909,
+      "prototypes_after": 1783,
+      "fit_s": 2.3135498330229893,
+      "old_class_5nn_accuracy": 0.972875816993464,
+      "new_class_5nn_accuracy": 0.9518789321543956,
+      "normalized_old_class_centroid_rms_drift": 0.027024047968793215,
+      "old_prototype_input_kl_nats": 9.591661155402145e-06,
+      "old_prototype_input_position_kl_nats": 6.12273862641348e-05,
+      "old_prototype_output_kl_nats": 3.835877939997066e-06,
+      "old_prototype_output_position_kl_nats": 4.0390034989197626e-05,
+      "optimizer": {
+        "source": "prototypes",
+        "protected_prototypes": 909,
+        "input": {
+          "loss_before": 0.30448070253542475,
+          "loss_after": 7.081910319096509e-05,
+          "iterations": 6,
+          "success": true,
+          "temperature": 53.10077185795288
+        },
+        "output": {
+          "loss_before": 0.42633789973806085,
+          "loss_after": 4.4225935832412944e-05,
+          "iterations": 6,
+          "success": true,
+          "temperature": 47.72809561926499
+        }
+      }
+    },
+    {
+      "condition": "Restore trained prototypes; new only",
+      "old_replay_n": 0,
+      "old_prototypes": 909,
+      "prototypes_after": 1783,
+      "fit_s": 1.9303707500221208,
+      "old_class_5nn_accuracy": 0.9714052287581699,
+      "new_class_5nn_accuracy": 0.9498384628464547,
+      "normalized_old_class_centroid_rms_drift": 0.025721406825729293,
+      "old_prototype_input_kl_nats": 0.0,
+      "old_prototype_input_position_kl_nats": 0.0,
+      "old_prototype_output_kl_nats": 0.0,
+      "old_prototype_output_position_kl_nats": 0.0,
+      "optimizer": null
+    },
+    {
+      "condition": "Raw replay 35%; no KL",
+      "old_replay_n": 10709,
+      "old_prototypes": 909,
+      "prototypes_after": 1775,
+      "fit_s": 2.3283121660351753,
+      "old_class_5nn_accuracy": 0.9684640522875817,
+      "new_class_5nn_accuracy": 0.9518789321543956,
+      "normalized_old_class_centroid_rms_drift": 0.1836401495835744,
+      "old_prototype_input_kl_nats": 0.042831166147110945,
+      "old_prototype_input_position_kl_nats": 0.17121829866480737,
+      "old_prototype_output_kl_nats": 0.17366421120584735,
+      "old_prototype_output_position_kl_nats": 0.10884866659028687,
+      "optimizer": null
+    }
+  ]
+}

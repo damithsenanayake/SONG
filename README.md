@@ -48,7 +48,19 @@ model.fit(new_data)
 print(model.retention_result_)
 ```
 
-The weights default to zero. Enable them before the first fit so anchors can be stored. The refinement adjusts output coordinates after training; it does not prevent input coding vectors from drifting. The [matched MNIST ablation](reports/song_retention_kl_mnist.json) shows that KL improves old cluster positions, while rehearsal remains necessary to retain old class separation. See the [preprint draft](preprint/SONG_initialized_UMAP.md#43-implemented-kl-coordinate-refinement) for the objective and limitations.
+The weights default to zero. In the default `retention_source='samples'` mode, enable them before the first fit so old input anchors can be stored. That mode adjusts output coordinates after training; it does not prevent input coding vectors from drifting. The [matched MNIST ablation](reports/song_retention_kl_mnist.json) shows that rehearsal remains necessary for old-class separation in this mode.
+
+To use **trained prototypes instead of raw-data replay**, set `retention_source='prototypes'` with the KL weights. On each incremental fit, SONG snapshots the previous input and output prototypes, keeps their indices available, and refines both spaces after fitting the new data:
+
+```python
+model = SONG(so_steps=30, dispersion_method='none',
+             retention_source='prototypes',
+             retention_kl_weight=1.0, retention_position_weight=1.0)
+model.fit(old_data)
+model.fit(new_data)  # only new rows
+```
+
+The [three-seed prototype experiment](reports/song_prototype_kl_seeds.csv) finds strong old-position retention without old-image replay. Its Gaussian-position KL result is matched by simply restoring the saved prototypes, so the [preprint draft](preprint/SONG_initialized_UMAP.md#44-trained-prototype-kl-without-old-image-replay) treats that restore as an essential control. This mode has been evaluated on one heterogeneous increment, not on later increments or UMAP graph refinement.
 
 ## Reproducible performance reports
 

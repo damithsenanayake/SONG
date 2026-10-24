@@ -28,7 +28,7 @@ class SONG(BaseEstimator):
                  random_seed=1, epsilon=.9, a=None, b=None, final_vector_count=None, dispersion_method = 'UMAP',
                  fvc_growth=0.5, chunk_size = 1000, pc_components = 50, non_so_rate = 0, low_memory = False, sampled_batches = False, um_min_dist = 0.001, um_lr = 0.01, um_epochs = 11,
                  retention_kl_weight=0.0, retention_position_weight=0.0,
-                 retention_anchor_count=256, retention_maxiter=30):
+                 retention_anchor_count=256, retention_maxiter=30, retention_source='samples'):
 
         ''' Initialize a SONG to reduce data.
 
@@ -87,7 +87,12 @@ class SONG(BaseEstimator):
         anchors. They are not replayed during the SONG prototype update.
 
         :param retention_maxiter: Maximum L-BFGS iterations in the post-update
-        coordinate refinement. Input coding vectors are not changed by it.
+        refinement.
+
+        :param retention_source: 'samples' keeps old input anchors and refines
+        output coordinates. 'prototypes' snapshots learned W and Y, protects
+        their indices from recycling, and refines both spaces using KL. The
+        prototype option does not replay old input rows.
 
         '''
 
@@ -131,6 +136,9 @@ class SONG(BaseEstimator):
             raise ValueError('retention weights must be nonnegative')
         if retention_anchor_count < 2 or retention_maxiter < 1:
             raise ValueError('retention_anchor_count >= 2 and retention_maxiter >= 1 are required')
+        if retention_source not in ('samples', 'prototypes'):
+            raise ValueError("retention_source must be 'samples' or 'prototypes'")
+        self.retention_source = retention_source
         self.retention_kl_weight = retention_kl_weight
         self.retention_position_weight = retention_position_weight
         self.retention_anchor_count = retention_anchor_count
@@ -139,6 +147,7 @@ class SONG(BaseEstimator):
         self._retention_anchor_Y = None
         self.retention_result_ = None
         self._last_reduction = None
+        self._protected_prototypes = 0
 
         if not sampled_batches is None:
             self.sampled_batches = sampled_batches
@@ -210,6 +219,44 @@ class SONG(BaseEstimator):
             'temperature': temperature,
         }
 
+    def _optimize_prototype_space(self, current, reference):
+        current = np.asarray(current, dtype=np.float64)
+        reference = np.asarray(reference, dtype=np.float64)
+        temperature = neighborhood_temperature(reference)
+
+        def objective(flat):
+            value, gradient, _, _ = position_kl_loss_and_grad(
+                flat.reshape(current.shape), reference, temperature,
+                self.retention_kl_weight, self.retention_position_weight)
+            return value, gradient.ravel()
+
+        before = objective(current.ravel())[0]
+        result = minimize(objective, current.ravel(), jac=True, method='L-BFGS-B',
+                          options={'maxiter': self.retention_maxiter})
+        return result.x.reshape(current.shape), {
+            'loss_before': float(before), 'loss_after': float(result.fun),
+            'iterations': int(result.nit), 'success': bool(result.success),
+            'temperature': temperature,
+        }
+
+    def _apply_prototype_retention_kl(self, old_W, old_Y):
+        count = len(old_W)
+        if self._last_reduction == 'PCA' and self.pca is not None and old_W.shape[1] > self.pc_components:
+            old_input = self.pca.transform(old_W).astype(np.float64)
+            current_input = self.pca.transform(self.W[:count]).astype(np.float64)
+            updated_input, input_result = self._optimize_prototype_space(current_input, old_input)
+            input_delta = (updated_input - current_input) @ self.pca.components_
+            self.W[:count] += input_delta.astype(np.float32)
+        else:
+            updated_input, input_result = self._optimize_prototype_space(self.W[:count], old_W)
+            self.W[:count] = updated_input.astype(np.float32)
+        updated_output, output_result = self._optimize_prototype_space(self.Y[:count], old_Y)
+        self.Y[:count] = updated_output.astype(np.float32)
+        self.retention_result_ = {
+            'source': 'prototypes', 'protected_prototypes': count,
+            'input': input_result, 'output': output_result,
+        }
+
     def fit(self, X, reduction = 'PCA', corrected_PC = np.array([])):
         '''
         :param X: The input dataset normalized over the dataset to range [0, 1].
@@ -221,9 +268,16 @@ class SONG(BaseEstimator):
         self.retention_result_ = None
         self._last_reduction = reduction
         retention_active = self.retention_kl_weight > 0 or self.retention_position_weight > 0
-        if self.trained and retention_active and self._retention_anchor_X is None:
-            raise ValueError('retention must be enabled before the initial fit')
+        if (self.retention_source == 'samples' and self.trained and retention_active
+                and self._retention_anchor_X is None):
+            raise ValueError('sample retention must be enabled before the initial fit')
         incremental_retention = self.trained and retention_active
+        old_prototype_W = old_prototype_Y = None
+        self._protected_prototypes = 0
+        if self.trained and self.retention_source == 'prototypes':
+            old_prototype_W = self.W.copy()
+            old_prototype_Y = self.Y.copy()
+            self._protected_prototypes = len(old_prototype_W)
 
         use_pca = reduction == 'PCA' and X.shape[1] > self.pc_components
         if use_pca:
@@ -332,7 +386,8 @@ class SONG(BaseEstimator):
 
                 if self.mutable_graph and self.prototypes >= G.shape[0] and i > 0:
                     ''' Growing of new coding vectors and low-dimensional vectors '''
-                    W, G, Y, E_q = bulk_grow_with_drifters(shp, E_q, thresh_g, drifters, G, W, Y)
+                    W, G, Y, E_q = bulk_grow_with_drifters(
+                        shp, E_q, thresh_g, drifters[drifters >= self._protected_prototypes], G, W, Y)
 
                 '''shp is an index set used for optimizing search operations'''
                 shp = np.arange(G.shape[0], dtype=np.int32)
@@ -386,9 +441,11 @@ class SONG(BaseEstimator):
         self.E_q = E_q
         self.so_lr_st = so_lr_st
         self.trained = True
-        if incremental_retention:
+        if incremental_retention and self.retention_source == 'prototypes':
+            self._apply_prototype_retention_kl(old_prototype_W, old_prototype_Y)
+        elif incremental_retention:
             self._apply_retention_kl()
-        elif retention_active and self._retention_anchor_X is None:
+        elif retention_active and self.retention_source == 'samples' and self._retention_anchor_X is None:
             count = min(self.retention_anchor_count, len(X))
             anchor_ids = np.random.RandomState(self.random_seed).choice(len(X), count, replace=False)
             self._retention_anchor_X = X[anchor_ids].copy()

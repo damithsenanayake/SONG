@@ -4,10 +4,16 @@ import numpy as np
 from scipy.special import logsumexp
 
 
+def _squared_distances(positions):
+    squared_norms = np.sum(positions * positions, axis=1)
+    distances = squared_norms[:, None] + squared_norms[None, :] - 2 * positions @ positions.T
+    return np.maximum(distances, 0.0)
+
+
 def neighborhood_temperature(positions):
     """A fixed, global bandwidth from the reference anchor layout."""
     positions = np.asarray(positions, dtype=np.float64)
-    distances = np.sum((positions[:, None] - positions[None, :]) ** 2, axis=2)
+    distances = _squared_distances(positions)
     positive = distances[np.triu_indices(len(positions), 1)]
     positive = positive[positive > 0]
     return float(np.median(positive)) if len(positive) else 1.0
@@ -28,8 +34,8 @@ def position_kl_loss_and_grad(current, reference, temperature, kl_weight=1.0,
     if temperature <= 0 or kl_weight < 0 or position_weight < 0:
         raise ValueError('temperature must be positive and weights nonnegative')
     n = len(current)
-    d_ref = np.sum((reference[:, None] - reference[None, :]) ** 2, axis=2)
-    d_cur = np.sum((current[:, None] - current[None, :]) ** 2, axis=2)
+    d_ref = _squared_distances(reference)
+    d_cur = _squared_distances(current)
     np.fill_diagonal(d_ref, np.inf)
     np.fill_diagonal(d_cur, np.inf)
     logq = -d_ref / temperature

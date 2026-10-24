@@ -55,3 +55,45 @@ def test_retention_changes_coordinates_but_not_prototype_weights():
     protected.fit(new)
     np.testing.assert_array_equal(plain.W, protected.W)
     assert not np.array_equal(plain.Y, protected.Y)
+
+
+def test_prototype_kl_refines_input_and_output_without_sample_replay():
+    rng = np.random.default_rng(23)
+    old = rng.normal(0, .1, (100, 8)).astype(np.float32)
+    new = rng.normal(.7, .1, (100, 8)).astype(np.float32)
+    common = dict(so_steps=3, final_vector_count=24, random_seed=5,
+                  dispersion_method='none', retention_source='prototypes')
+    plain = SONG(**common)
+    protected = SONG(**common, retention_kl_weight=1.,
+                     retention_position_weight=1., retention_maxiter=20)
+    plain.fit(old)
+    protected.fit(old)
+    assert protected._retention_anchor_X is None
+    np.testing.assert_array_equal(plain.W, protected.W)
+    np.testing.assert_array_equal(plain.Y, protected.Y)
+    old_count = len(protected.W)
+    plain.fit(new)
+    protected.fit(new)
+    result = protected.retention_result_
+    assert result['source'] == 'prototypes'
+    assert result['protected_prototypes'] == old_count
+    assert result['input']['loss_after'] < result['input']['loss_before']
+    assert result['output']['loss_after'] < result['output']['loss_before']
+    assert len(protected.W) >= old_count
+    assert not np.array_equal(plain.W[:old_count], protected.W[:old_count])
+    assert not np.array_equal(plain.Y[:old_count], protected.Y[:old_count])
+    assert np.isfinite(protected.W).all() and np.isfinite(protected.Y).all()
+
+
+def test_prototype_kl_accepts_successive_increments():
+    rng = np.random.default_rng(31)
+    model = SONG(so_steps=2, final_vector_count=20, random_seed=3,
+                 dispersion_method='none', retention_source='prototypes',
+                 retention_kl_weight=1., retention_position_weight=1.,
+                 retention_maxiter=12)
+    for location in [0., .4, .8]:
+        batch = rng.normal(location, .1, (80, 8)).astype(np.float32)
+        model.fit(batch)
+        assert np.isfinite(model.W).all() and np.isfinite(model.Y).all()
+    assert model.retention_result_['source'] == 'prototypes'
+    assert model._retention_anchor_X is None
